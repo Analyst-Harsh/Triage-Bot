@@ -20,12 +20,21 @@ uv run python main.py      # run the app entrypoint
 uv run pytest              # run the full test suite (tests/ is the default testpath)
 uv run pytest -v           # verbose
 uv run pytest tests/graph/test_state.py::test_checkpoint_serde_round_trip_on_initial_state  # run a single test
-uv run ruff check .        # lint (flake8-equivalent: pyflakes/pycodestyle + isort, pyupgrade, bugbear, comprehensions)
-uv run ruff check . --fix  # lint and auto-fix what's safely fixable
-uv run mypy                # type check (strict mode, config in pyproject.toml picks up graph/, tests/, main.py)
+uv run ruff format .        # format the whole project
+uv run ruff format --check . # check formatting without changing files (what pre-push runs)
+uv run ruff check .         # lint (see rule set below)
+uv run ruff check . --fix   # lint and auto-fix what's safely fixable
+uv run pyright              # type check (strict mode, whole-project — see [tool.pyright] in pyproject.toml)
+uv run lefthook install     # one-time: activate the git hooks (must be run manually per clone, uv doesn't do this automatically)
+uv run lefthook run pre-commit  # run the pre-commit hook set manually against staged files
+uv run lefthook run pre-push     # run the pre-push hook set manually against the whole project
 ```
 
-Any new code should pass `ruff check .` and `mypy` cleanly — both are configured in `pyproject.toml` (`[tool.ruff]`, `[tool.mypy]`) and both currently pass on the full codebase. There is no formatter (`ruff format`/`black`) configured — don't assume one exists or reformat files wholesale.
+Any new code should pass `ruff format --check .`, `ruff check .`, and `pyright` cleanly — all three are configured in `pyproject.toml` (`[tool.ruff]`/`[tool.ruff.lint]`/`[tool.ruff.format]`, `[tool.pyright]`) and currently pass on the full codebase.
+
+**Ruff lint rule set**: beyond flake8-equivalent (`E`/`W`/`F`) plus `I`/`UP`/`B`/`C4`, also enabled: `N` (naming), `S` (bandit security — relevant since this bot processes untrusted issue text and will execute sandboxed code fixes), `SIM` (simplify), `RUF` (ruff-specific), `PT` (pytest style), `DTZ` (no naive datetimes — matches the `datetime.now(UTC)` convention already used everywhere), `ASYNC` (for when FastAPI handlers land), `ARG` (unused arguments), `PERF`, `TID` (tidy imports). `S101` (assert) is ignored under `tests/**` via `per-file-ignores` since assert is idiomatic pytest, not a security concern there.
+
+**Git hooks (`lefthook.yml`)**: `pre-commit` runs `ruff format` → `ruff check --fix` → `pyright`, scoped to staged files only, auto-fixing and re-staging what it can (`stage_fixed: true`) — kept fast and low-friction for every commit. `pre-push` re-runs format/lint/type-check across the **whole project** in check-only mode (no auto-fix — a push shouldn't silently rewrite files) plus the full `pytest` suite — this is the safety net that catches anything a staged-files-only pre-commit could miss (e.g. a change that breaks type-checking in a file you didn't touch).
 
 ## Architecture
 
@@ -42,4 +51,6 @@ Any new code should pass `ruff check .` and `mypy` cleanly — both are configur
 
 **Testing convention** (`tests/graph/`, mirrors `graph/` layout): every schema has a construction test and a JSON round-trip test (`model_dump_json` → `model_validate_json`). The discriminated union additionally has dispatch and rejection tests. `tests/graph/test_state.py` round-trips full `TriageState` instances through LangGraph's own `langgraph.checkpoint.serde.jsonplus.JsonPlusSerializer` (`dumps_typed`/`loads_typed`) — this is the check that actually matters, since it proves state survives what the Postgres checkpointer will do to it in production, not just that individual models validate. Any new state field should get this same round-trip coverage, not just a unit test of the field in isolation.
 
-**Typing convention**: `mypy` runs in `strict` mode (with the `pydantic.mypy` plugin) across `graph/`, `tests/`, and `main.py`. Every function needs a return type annotation (including `-> None` for tests), and helper functions that accept arbitrary override kwargs (the `make_*(**overrides: Any) -> Model` pattern used throughout `tests/graph/schemas/`) type them as `**overrides: Any` with an explicit `dict[str, Any]` for the defaults — don't leave `**kwargs` unannotated.
+**Typing convention**: `pyright` runs in `strict` mode across the **whole project** (`include = ["."]`, not an allowlist of specific paths — new code under `api/`/`tools/` gets checked automatically without touching config) (Pydantic v2's native `dataclass_transform` support means no plugin is needed, unlike mypy). `reportMissingTypeStubs` is disabled in `[tool.pyright]` — that check is about third-party library stub completeness (e.g. `langgraph`'s submodules have inconsistent `py.typed` coverage), not our own code's type coverage, so it's not worth failing strict mode over. Every function needs a return type annotation (including `-> None` for tests), and helper functions that accept arbitrary override kwargs (the `make_*(**overrides: Any) -> Model` pattern used throughout `tests/graph/schemas/`) type them as `**overrides: Any` with an explicit `dict[str, Any]` for the defaults — don't leave `**kwargs` unannotated.
+
+**If you add a new top-level source directory** (e.g. start putting code in `api/` or `tools/`), nothing needs to change in `[tool.pyright]` or `[tool.ruff]` — both already scan the whole project by default and only exclude `.venv`/`__pycache__`/dot-directories.

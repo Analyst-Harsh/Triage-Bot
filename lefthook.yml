@@ -1,0 +1,31 @@
+pre-commit:
+  parallel: false
+  commands:
+    ruff-format:
+      glob: "*.py"
+      run: uv run ruff format {staged_files}
+      stage_fixed: true
+    ruff-lint:
+      glob: "*.py"
+      run: uv run ruff check --fix {staged_files}
+      stage_fixed: true
+    pyright:
+      glob: "*.py"
+      run: uv run pyright {staged_files}
+
+# Fast pre-commit only checks staged files, so a change can still break
+# something elsewhere that wasn't touched in that commit. pre-push is the
+# full-repo safety net before code leaves the machine: whole-project lint,
+# format, and type checks (check-only, no auto-fix — a push shouldn't
+# silently rewrite files) plus the full test suite.
+pre-push:
+  parallel: true
+  commands:
+    ruff-format-check:
+      run: uv run ruff format --check .
+    ruff-lint:
+      run: uv run ruff check .
+    pyright:
+      run: uv run pyright
+    pytest:
+      run: uv run pytest -q

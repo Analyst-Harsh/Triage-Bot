@@ -14,7 +14,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "mypy>=1.14",
+    "lefthook>=1.9",
+    "pyright>=1.1",
     "pytest>=8",
     "ruff>=0.9",
 ]
@@ -25,19 +26,49 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+target-version = "py314"
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes (flake8 core, includes unused-import/unused-variable)
-    "I",   # isort
-    "UP",  # pyupgrade
-    "B",   # flake8-bugbear
-    "C4",  # flake8-comprehensions
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes (flake8 core, includes unused-import/unused-variable)
+    "I",     # isort
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "N",     # pep8-naming
+    "S",     # flake8-bandit (security)
+    "SIM",   # flake8-simplify
+    "RUF",   # ruff-specific rules
+    "PT",    # flake8-pytest-style
+    "DTZ",   # flake8-datetimez (no naive datetimes)
+    "ASYNC", # flake8-async (relevant once FastAPI handlers exist)
+    "ARG",   # flake8-unused-arguments
+    "PERF",  # perflint
+    "TID",   # flake8-tidy-imports
 ]
 
-[tool.mypy]
-strict = true
-plugins = ["pydantic.mypy"]
-files = ["graph", "tests", "main.py"]
+[tool.ruff.lint.per-file-ignores]
+# assert is idiomatic in pytest; test fixtures aren't a security surface
+"tests/**/*.py" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.pyright]
+# Whole-project coverage: don't allowlist specific paths (that silently stops
+# checking new code, e.g. when api/ or tools/ stop being empty) — exclude only
+# what should never be checked instead.
+include = ["."]
+exclude = ["**/__pycache__", ".venv"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+# Third-party libs (e.g. langgraph) have incomplete py.typed coverage across
+# their own submodules; this only concerns library stub completeness, not
+# type coverage of our own code, so it's not worth failing strict mode over.
+reportMissingTypeStubs = false
