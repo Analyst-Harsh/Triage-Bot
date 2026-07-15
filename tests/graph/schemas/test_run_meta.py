@@ -1,23 +1,24 @@
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from graph.schemas import RunError, RunMeta
 
 
-def make_run_meta(**overrides) -> RunMeta:
-    defaults = dict(
-        run_id=uuid4(),
-        thread_id="octo/repo#42",
-        trace_id="langfuse-trace-abc",
-        started_at=datetime.now(UTC),
-        max_iterations=15,
-        max_cost_usd=2.5,
-    )
+def make_run_meta(**overrides: Any) -> RunMeta:
+    defaults: dict[str, Any] = {
+        "run_id": uuid4(),
+        "thread_id": "octo/repo#42",
+        "trace_id": "langfuse-trace-abc",
+        "started_at": datetime.now(UTC),
+        "max_iterations": 15,
+        "max_cost_usd": 2.5,
+    }
     defaults.update(overrides)
     return RunMeta(**defaults)
 
 
-def test_construction_with_defaults():
+def test_construction_with_defaults() -> None:
     meta = make_run_meta()
     assert meta.iteration_count == 0
     assert meta.tool_calls_made == 0
@@ -25,7 +26,7 @@ def test_construction_with_defaults():
     assert meta.errors == []
 
 
-def test_errors_list():
+def test_errors_list() -> None:
     meta = make_run_meta(
         errors=[
             RunError(
@@ -39,7 +40,7 @@ def test_errors_list():
     assert meta.errors[0].node_name == "researcher"
 
 
-def test_json_round_trip():
+def test_json_round_trip() -> None:
     meta = make_run_meta()
     restored = RunMeta.model_validate_json(meta.model_dump_json())
     assert restored == meta

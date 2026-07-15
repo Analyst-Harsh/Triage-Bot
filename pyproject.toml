@@ -14,9 +14,30 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mypy>=1.14",
     "pytest>=8",
+    "ruff>=0.9",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes (flake8 core, includes unused-import/unused-variable)
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+]
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["graph", "tests", "main.py"]

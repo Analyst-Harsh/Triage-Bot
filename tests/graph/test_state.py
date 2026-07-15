@@ -19,7 +19,7 @@ from graph.schemas import (
     RunStatus,
     SandboxResult,
 )
-from graph.state import create_initial_state
+from graph.state import TriageState, create_initial_state
 
 
 def make_issue() -> IssuePayload:
@@ -38,7 +38,7 @@ def make_issue() -> IssuePayload:
     )
 
 
-def make_fully_populated_state():
+def make_fully_populated_state() -> TriageState:
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=15, max_cost_usd=2.5)
 
@@ -104,7 +104,7 @@ def make_fully_populated_state():
     return state
 
 
-def test_create_initial_state_defaults():
+def test_create_initial_state_defaults() -> None:
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
 
@@ -122,7 +122,7 @@ def test_create_initial_state_defaults():
     assert state["run_meta"].iteration_count == 0
 
 
-def test_checkpoint_serde_round_trip_on_initial_state():
+def test_checkpoint_serde_round_trip_on_initial_state() -> None:
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
 
@@ -133,7 +133,7 @@ def test_checkpoint_serde_round_trip_on_initial_state():
     assert restored == state
 
 
-def test_checkpoint_serde_round_trip_on_fully_populated_state():
+def test_checkpoint_serde_round_trip_on_fully_populated_state() -> None:
     state = make_fully_populated_state()
 
     serializer = JsonPlusSerializer()

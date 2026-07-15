@@ -20,9 +20,12 @@ uv run python main.py      # run the app entrypoint
 uv run pytest              # run the full test suite (tests/ is the default testpath)
 uv run pytest -v           # verbose
 uv run pytest tests/graph/test_state.py::test_checkpoint_serde_round_trip_on_initial_state  # run a single test
+uv run ruff check .        # lint (flake8-equivalent: pyflakes/pycodestyle + isort, pyupgrade, bugbear, comprehensions)
+uv run ruff check . --fix  # lint and auto-fix what's safely fixable
+uv run mypy                # type check (strict mode, config in pyproject.toml picks up graph/, tests/, main.py)
 ```
 
-There is no lint/format tooling configured yet (no ruff/black entries in `pyproject.toml`) — don't assume one exists.
+Any new code should pass `ruff check .` and `mypy` cleanly — both are configured in `pyproject.toml` (`[tool.ruff]`, `[tool.mypy]`) and both currently pass on the full codebase. There is no formatter (`ruff format`/`black`) configured — don't assume one exists or reformat files wholesale.
 
 ## Architecture
 
@@ -38,3 +41,5 @@ There is no lint/format tooling configured yet (no ruff/black entries in `pyproj
 **Module layout convention**: one Pydantic model (or tightly related pair, e.g. `RunError`/`RunMeta`) per file under `graph/schemas/`, all re-exported from `graph/schemas/__init__.py`. Follow this pattern for any new schema additions rather than growing an existing file or importing from the submodule directly.
 
 **Testing convention** (`tests/graph/`, mirrors `graph/` layout): every schema has a construction test and a JSON round-trip test (`model_dump_json` → `model_validate_json`). The discriminated union additionally has dispatch and rejection tests. `tests/graph/test_state.py` round-trips full `TriageState` instances through LangGraph's own `langgraph.checkpoint.serde.jsonplus.JsonPlusSerializer` (`dumps_typed`/`loads_typed`) — this is the check that actually matters, since it proves state survives what the Postgres checkpointer will do to it in production, not just that individual models validate. Any new state field should get this same round-trip coverage, not just a unit test of the field in isolation.
+
+**Typing convention**: `mypy` runs in `strict` mode (with the `pydantic.mypy` plugin) across `graph/`, `tests/`, and `main.py`. Every function needs a return type annotation (including `-> None` for tests), and helper functions that accept arbitrary override kwargs (the `make_*(**overrides: Any) -> Model` pattern used throughout `tests/graph/schemas/`) type them as `**overrides: Any` with an explicit `dict[str, Any]` for the defaults — don't leave `**kwargs` unannotated.

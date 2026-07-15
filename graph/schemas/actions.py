@@ -1,4 +1,4 @@
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -35,6 +35,6 @@ class CodeFixAction(BaseModel):
 
 
 DraftAction = Annotated[
-    Union[CommentAction, LabelAction, CloseAction, CodeFixAction],
+    CommentAction | LabelAction | CloseAction | CodeFixAction,
     Field(discriminator="action_type"),
 ]
