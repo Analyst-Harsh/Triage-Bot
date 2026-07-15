@@ -2,6 +2,22 @@
 
 Guidance for AI coding agents (and humans) working in this repository.
 
+## Engineering standards (default — applies without being asked)
+
+This is a production-grade repository, not a prototype or demo. Every change defaults to production-grade engineering, regardless of how the request is phrased — "production grade" does not need to be said in a prompt for it to apply here.
+
+- **Design patterns over raw/ad-hoc code.** When an established pattern fits, use it instead of hand-rolling something bespoke. This codebase already commits to specific patterns — follow them rather than introducing a competing style:
+  - Discriminated unions for polymorphic data (`graph/schemas/actions.py`'s `DraftAction`), not loosely-typed dicts with optional fields for every variant.
+  - A typed contract at every boundary (Pydantic models in/out of graph nodes, the `TriageState` TypedDict as the single source of truth for graph state) — see **Architecture** below.
+  - Factory functions for non-trivial construction (`create_initial_state()`) instead of duplicating init logic at each call site.
+  - One model/responsibility per file, re-exported from a package `__init__.py` (see **Module layout convention** below) — not one large file accumulating unrelated classes.
+- **Validate at boundaries, trust internals.** Pydantic models validate anything crossing a node, API, or serialization boundary. Don't re-validate the same data deeper in business logic once it's already a validated model.
+- **Type-complete by default.** Every function gets a real return type annotation; strict `pyright` passing is the bar, not an aspiration. Avoid `Any` as a shortcut — it's acceptable only where genuinely unavoidable (e.g. heterogeneous test-fixture kwargs, see **Typing convention**), and only with the same explicit, deliberate annotation used there.
+- **Tests are part of the definition of done**, not a follow-up task. New schemas/models get the same coverage shape as existing ones (construction + JSON round-trip at minimum; full checkpoint-serde round-trip for anything touching `TriageState` — see **Testing convention**).
+- **Lint, format, and type-check clean before considering work finished.** These are enforced by git hooks (see `lefthook.yml` below), but don't treat the hook as the first line of defense — run `ruff check .` / `ruff format --check .` / `pyright` yourself and fix what they find as part of doing the work, not as a separate cleanup pass.
+- **No silent shortcuts.** No "TODO: fix later," no swallowed exceptions, no disabled lint/type rules to make something pass — if a rule genuinely shouldn't apply, say why inline (see the `S101`/`tests/**` and `reportMissingTypeStubs` precedents below) rather than blanket-disabling it.
+- **When there's more than one way to build something, pick the one a senior engineer shipping this to production would pick** — not the one that's fastest to type out. If that's a nontrivial judgment call, it's worth a sentence of reasoning in the code (a comment) or the commit, not just a silent choice.
+
 ## Project overview
 
 Triage Bot is a LangGraph-based agent that triages GitHub issues. Full architecture and vision live in `docs/summary.md` (read it before making cross-cutting design decisions) — treat it as the source of truth for the intended pipeline and stack, not this file.
