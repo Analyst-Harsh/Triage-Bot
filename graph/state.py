@@ -29,6 +29,24 @@ class TriageState(TypedDict):
     run_meta: RunMeta
 
 
+class TriageStateUpdate(TypedDict, total=False):
+    """Partial-update contract returned by every `TriageNode`.
+
+    Mirrors `TriageState` minus `issue`, which is immutable input that no
+    node ever rewrites. `total=False` means a node only names the slots it
+    actually writes.
+    """
+
+    messages: list[BaseMessage]
+    planner_output: PlannerOutput | None
+    research_findings: ResearchFindings | None
+    draft: DraftOutput | None
+    risk_assessment: RiskAssessment | None
+    episodic_context: list[EpisodicMemoryHit]
+    status: RunStatus
+    run_meta: RunMeta
+
+
 def create_initial_state(
     issue: IssuePayload,
     *,

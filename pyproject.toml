@@ -63,7 +63,7 @@ docstring-code-format = true
 # checking new code, e.g. when api/ or tools/ stop being empty) — exclude only
 # what should never be checked instead.
 include = ["."]
-exclude = ["**/__pycache__", ".venv"]
+exclude = ["**/__pycache__", ".venv", "**/node_modules", "**/.*"]
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.14"
