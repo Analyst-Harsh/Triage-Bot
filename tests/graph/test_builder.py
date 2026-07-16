@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import NodeError
 
 from graph.builder import build_graph, handle_node_error
@@ -34,16 +35,16 @@ def test_build_graph_registers_all_six_nodes() -> None:
     } <= node_names
 
 
-def test_invoke_flows_through_all_nodes_to_auto_post() -> None:
+async def test_invoke_flows_through_all_nodes_to_auto_post() -> None:
     graph = build_graph()
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
 
-    # langgraph's CompiledStateGraph.invoke() overloads resolve to a
+    # langgraph's CompiledStateGraph.ainvoke() overloads resolve to a
     # partially-Unknown type under strict pyright for the same reason as the
     # builder-method ignores in graph/builder.py — a library generics gap,
     # not ours.
-    result = graph.invoke(state)  # pyright: ignore[reportUnknownMemberType]
+    result = await graph.ainvoke(state)  # pyright: ignore[reportUnknownMemberType]
 
     # Stub RiskCheckNode always reports LOW risk, so this run always takes
     # the auto_post branch — both branches of route_by_risk are proven
@@ -55,6 +56,15 @@ def test_invoke_flows_through_all_nodes_to_auto_post() -> None:
     assert result["risk_assessment"] is not None
     assert len(result["messages"]) == 1
     assert result["run_meta"].iteration_count == 5
+
+
+def test_build_graph_threads_checkpointer_through_compile() -> None:
+    checkpointer = InMemorySaver()
+
+    graph = build_graph(checkpointer=checkpointer)
+
+    # Same library generics gap as the ignores elsewhere in this file/builder.py.
+    assert graph.checkpointer is checkpointer  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_handle_node_error_records_run_error_and_fails_run() -> None:

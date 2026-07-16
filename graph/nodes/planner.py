@@ -15,7 +15,7 @@ class PlannerNode(TriageNode):
 
     # `state` is unused in this stub; TriageNode.execute()'s signature
     # requires it (renaming breaks strict override typing, see base.py).
-    def execute(self, state: TriageState) -> TriageStateUpdate:  # noqa: ARG002
+    async def execute(self, state: TriageState) -> TriageStateUpdate:  # noqa: ARG002
         output = PlannerOutput(
             issue_type=IssueType.BUG,
             classification_confidence=0.0,

@@ -3,9 +3,9 @@ from graph.schemas import IssueType, RunStatus
 from graph.state import TriageState
 
 
-def test_execute_returns_stub_bug_classification(triage_state: TriageState) -> None:
+async def test_execute_returns_stub_bug_classification(triage_state: TriageState) -> None:
     node = PlannerNode()
-    update = node.execute(triage_state)
+    update = await node.execute(triage_state)
 
     assert "planner_output" in update
     assert update["planner_output"] is not None
@@ -14,9 +14,9 @@ def test_execute_returns_stub_bug_classification(triage_state: TriageState) -> N
     assert update["status"] == RunStatus.PLANNING
 
 
-def test_call_bumps_iteration_count(triage_state: TriageState) -> None:
+async def test_call_bumps_iteration_count(triage_state: TriageState) -> None:
     node = PlannerNode()
-    update = node(triage_state)
+    update = await node(triage_state)
 
     assert "run_meta" in update
     assert update["run_meta"].iteration_count == 1

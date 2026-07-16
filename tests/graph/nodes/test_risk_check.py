@@ -3,9 +3,9 @@ from graph.schemas import RiskLevel, RunStatus
 from graph.state import TriageState
 
 
-def test_execute_returns_stub_low_risk_assessment(triage_state: TriageState) -> None:
+async def test_execute_returns_stub_low_risk_assessment(triage_state: TriageState) -> None:
     node = RiskCheckNode()
-    update = node.execute(triage_state)
+    update = await node.execute(triage_state)
 
     assert "risk_assessment" in update
     assert update["risk_assessment"] is not None
@@ -15,9 +15,9 @@ def test_execute_returns_stub_low_risk_assessment(triage_state: TriageState) -> 
     assert update["status"] == RunStatus.RISK_CHECK
 
 
-def test_call_bumps_iteration_count(triage_state: TriageState) -> None:
+async def test_call_bumps_iteration_count(triage_state: TriageState) -> None:
     node = RiskCheckNode()
-    update = node(triage_state)
+    update = await node(triage_state)
 
     assert "run_meta" in update
     assert update["run_meta"].iteration_count == 1

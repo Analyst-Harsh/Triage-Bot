@@ -16,7 +16,7 @@ class DrafterNode(TriageNode):
 
     # `state` is unused in this stub; TriageNode.execute()'s signature
     # requires it (renaming breaks strict override typing, see base.py).
-    def execute(self, state: TriageState) -> TriageStateUpdate:  # noqa: ARG002
+    async def execute(self, state: TriageState) -> TriageStateUpdate:  # noqa: ARG002
         draft = DraftOutput(
             action=CommentAction(comment_body="stub: drafter not yet implemented"),
             rationale="stub: drafter not yet implemented",

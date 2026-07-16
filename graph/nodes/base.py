@@ -38,8 +38,8 @@ class TriageNode(ABC):
     """Canonical graph node name — used as the add_node() key and as
     RunError.node_name on failure."""
 
-    def __call__(self, state: TriageState) -> TriageStateUpdate:
-        update = self.execute(state)
+    async def __call__(self, state: TriageState) -> TriageStateUpdate:
+        update = await self.execute(state)
         base_run_meta = update.get("run_meta", state["run_meta"])
         update["run_meta"] = base_run_meta.model_copy(
             update={"iteration_count": base_run_meta.iteration_count + 1}
@@ -47,7 +47,7 @@ class TriageNode(ABC):
         return update
 
     @abstractmethod
-    def execute(self, state: TriageState) -> TriageStateUpdate:
+    async def execute(self, state: TriageState) -> TriageStateUpdate:
         """Node-specific logic. Let exceptions propagate — do not catch
         broadly here; the graph-wide `error_handler` (see class docstring)
         converts them into a `RunError` + `status=FAILED` update."""

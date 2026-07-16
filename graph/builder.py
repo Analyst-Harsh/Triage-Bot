@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import NodeError
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -30,7 +31,9 @@ def handle_node_error(state: TriageState, error: NodeError) -> TriageStateUpdate
     return TriageStateUpdate(status=RunStatus.FAILED, run_meta=updated_run_meta)
 
 
-def build_graph() -> CompiledStateGraph[TriageState]:
+def build_graph(
+    checkpointer: BaseCheckpointSaver[str] | None = None,
+) -> CompiledStateGraph[TriageState]:
     """Wires the Planner -> Researcher -> Drafter -> Risk check ->
     (auto-post | approval queue) pipeline.
 
@@ -70,4 +73,4 @@ def build_graph() -> CompiledStateGraph[TriageState]:
     workflow.add_edge(auto_post.name, END)
     workflow.add_edge(approval_queue.name, END)
 
-    return workflow.compile()  # pyright: ignore[reportUnknownMemberType]
+    return workflow.compile(checkpointer=checkpointer)  # pyright: ignore[reportUnknownMemberType]

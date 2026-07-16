@@ -3,9 +3,9 @@ from graph.schemas import RunStatus
 from graph.state import TriageState
 
 
-def test_execute_returns_stub_comment_action(triage_state: TriageState) -> None:
+async def test_execute_returns_stub_comment_action(triage_state: TriageState) -> None:
     node = DrafterNode()
-    update = node.execute(triage_state)
+    update = await node.execute(triage_state)
 
     assert "draft" in update
     assert update["draft"] is not None
@@ -14,9 +14,9 @@ def test_execute_returns_stub_comment_action(triage_state: TriageState) -> None:
     assert update["status"] == RunStatus.DRAFTING
 
 
-def test_call_bumps_iteration_count(triage_state: TriageState) -> None:
+async def test_call_bumps_iteration_count(triage_state: TriageState) -> None:
     node = DrafterNode()
-    update = node(triage_state)
+    update = await node(triage_state)
 
     assert "run_meta" in update
     assert update["run_meta"].iteration_count == 1

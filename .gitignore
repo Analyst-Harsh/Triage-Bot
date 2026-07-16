@@ -4,3 +4,7 @@
 .ruff_cache/
 .pytest_cache/
 .mypy_cache/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
