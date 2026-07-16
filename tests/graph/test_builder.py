@@ -1,12 +1,15 @@
 from datetime import UTC, datetime
 
+import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import NodeError
 from structlog.testing import capture_logs
 
+import graph.builder as builder_module
 from graph.builder import build_graph, handle_node_error
 from graph.schemas import IssuePayload, IssueSource, RunStatus
 from graph.state import create_initial_state
+from tests.graph.nodes.conftest import make_fake_planner_node
 
 
 def make_issue() -> IssuePayload:
@@ -22,7 +25,8 @@ def make_issue() -> IssuePayload:
     )
 
 
-def test_build_graph_registers_all_six_nodes() -> None:
+def test_build_graph_registers_all_six_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(builder_module, "PlannerNode", make_fake_planner_node)
     graph = build_graph()
 
     node_names = set(graph.get_graph().nodes.keys())
@@ -36,7 +40,10 @@ def test_build_graph_registers_all_six_nodes() -> None:
     } <= node_names
 
 
-async def test_invoke_flows_through_all_nodes_to_auto_post() -> None:
+async def test_invoke_flows_through_all_nodes_to_auto_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(builder_module, "PlannerNode", make_fake_planner_node)
     graph = build_graph()
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
@@ -59,7 +66,10 @@ async def test_invoke_flows_through_all_nodes_to_auto_post() -> None:
     assert result["run_meta"].iteration_count == 5
 
 
-def test_build_graph_threads_checkpointer_through_compile() -> None:
+def test_build_graph_threads_checkpointer_through_compile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(builder_module, "PlannerNode", make_fake_planner_node)
     checkpointer = InMemorySaver()
 
     graph = build_graph(checkpointer=checkpointer)

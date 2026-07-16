@@ -1,13 +1,16 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+import graph.builder as builder_module
 from graph.builder import build_graph
 from graph.checkpointer import sqlite_checkpointer
 from graph.schemas import IssuePayload, IssueSource, RunStatus
 from graph.state import create_initial_state
+from tests.graph.nodes.conftest import make_fake_planner_node
 
 
 def make_issue() -> IssuePayload:
@@ -23,11 +26,14 @@ def make_issue() -> IssuePayload:
     )
 
 
-async def test_state_survives_reopening_the_same_db_file(tmp_path: Path) -> None:
+async def test_state_survives_reopening_the_same_db_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The property that actually matters: state persisted by one
     `AsyncSqliteSaver`/connection is still readable from an independent
     second connection against the same file. `MemorySaver` couldn't do this
     at all — it loses everything once the process/connection is gone."""
+    monkeypatch.setattr(builder_module, "PlannerNode", make_fake_planner_node)
     db_path = str(tmp_path / "checkpoints.db")
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)

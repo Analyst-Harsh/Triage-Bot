@@ -1,26 +1,49 @@
 from datetime import UTC, datetime
 from typing import ClassVar
 
-from graph.nodes.base import TriageNode
+from structlog import get_logger
+
+from graph.nodes.llm_node import LLMNode
 from graph.nodes.node_names import NodeName
-from graph.schemas import IssueType, PlannerOutput, RunStatus
+from graph.schemas import PlannerClassification, PlannerOutput, RunStatus
 from graph.state import TriageState, TriageStateUpdate
+from llm.config import LLMEndpointConfig, NodeLLMConfig
+from prompts.planner import PLANNER_PROMPT, format_issue_for_prompt
+
+log = get_logger(__name__)
 
 
-class PlannerNode(TriageNode):
-    """Reads the raw issue and classifies it. Stub: hardcodes a BUG
-    classification until the real planning logic is implemented."""
+class PlannerNode(LLMNode):
+    """Reads the raw issue and classifies it via an LLM call."""
 
     name: ClassVar[NodeName] = NodeName.PLANNER
+    llm_config: ClassVar[NodeLLMConfig] = NodeLLMConfig(
+        primary=LLMEndpointConfig(provider="openai", model="gpt-4o-mini"),
+        fallback=LLMEndpointConfig(provider="anthropic", model="claude-haiku-4-5-20251001"),
+    )
 
-    # `state` is unused in this stub; TriageNode.execute()'s signature
-    # requires it (renaming breaks strict override typing, see base.py).
-    async def execute(self, state: TriageState) -> TriageStateUpdate:  # noqa: ARG002
-        output = PlannerOutput(
-            issue_type=IssueType.BUG,
-            classification_confidence=0.0,
-            investigation_plan=[],
-            reasoning="stub: planner not yet implemented",
-            classified_at=datetime.now(UTC),
+    async def execute(self, state: TriageState) -> TriageStateUpdate:
+        messages = PLANNER_PROMPT.format_messages(
+            issue_text=format_issue_for_prompt(state["issue"])
         )
-        return TriageStateUpdate(planner_output=output, status=RunStatus.PLANNING)
+        result = await self.call_structured(messages, PlannerClassification)
+        output = PlannerOutput(**result.parsed.model_dump(), classified_at=datetime.now(UTC))
+
+        run_meta = state["run_meta"]
+        new_cost = run_meta.estimated_cost_usd + result.estimated_cost_usd
+
+        log.info(
+            "planner_classified",
+            issue_number=state["issue"].issue_number,
+            issue_type=output.issue_type.value,
+            classification_confidence=output.classification_confidence,
+            investigation_plan=output.investigation_plan,
+            reasoning=output.reasoning,
+            classified_at=output.classified_at.isoformat(),
+            estimated_cost_usd=result.estimated_cost_usd,
+        )
+        return TriageStateUpdate(
+            planner_output=output,
+            status=RunStatus.PLANNING,
+            run_meta=run_meta.model_copy(update={"estimated_cost_usd": new_cost}),
+        )

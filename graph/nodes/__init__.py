@@ -2,6 +2,7 @@ from graph.nodes.approval_queue import ApprovalQueueNode
 from graph.nodes.auto_post import AutoPostNode
 from graph.nodes.base import TriageNode
 from graph.nodes.drafter import DrafterNode
+from graph.nodes.llm_node import LLMNode
 from graph.nodes.planner import PlannerNode
 from graph.nodes.researcher import ResearcherNode
 from graph.nodes.risk_check import RiskCheckNode
@@ -11,6 +12,7 @@ __all__ = [
     "ApprovalQueueNode",
     "AutoPostNode",
     "DrafterNode",
+    "LLMNode",
     "PlannerNode",
     "ResearcherNode",
     "RiskCheckNode",
