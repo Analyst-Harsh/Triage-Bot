@@ -1,8 +1,13 @@
+import time
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
+import structlog
+
 from graph.nodes.node_names import NodeName
 from graph.state import TriageState, TriageStateUpdate
+
+log = structlog.get_logger(__name__)
 
 
 class TriageNode(ABC):
@@ -39,7 +44,18 @@ class TriageNode(ABC):
     RunError.node_name on failure."""
 
     async def __call__(self, state: TriageState) -> TriageStateUpdate:
-        update = await self.execute(state)
+        run_meta = state["run_meta"]
+        with structlog.contextvars.bound_contextvars(
+            run_id=str(run_meta.run_id),
+            thread_id=run_meta.thread_id,
+            trace_id=run_meta.trace_id,
+        ):
+            log.info("node_started", node=self.name)
+            started_at = time.monotonic()
+            update = await self.execute(state)
+            duration_ms = round((time.monotonic() - started_at) * 1000, 2)
+            log.info("node_finished", node=self.name, duration_ms=duration_ms)
+
         base_run_meta = update.get("run_meta", state["run_meta"])
         update["run_meta"] = base_run_meta.model_copy(
             update={"iteration_count": base_run_meta.iteration_count + 1}

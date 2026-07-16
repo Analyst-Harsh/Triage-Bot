@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import structlog
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import NodeError
 from langgraph.graph import END, START, StateGraph
@@ -17,6 +18,8 @@ from graph.nodes import (
 from graph.schemas import RunError, RunStatus
 from graph.state import TriageState, TriageStateUpdate
 
+log = structlog.get_logger(__name__)
+
 
 def handle_node_error(state: TriageState, error: NodeError) -> TriageStateUpdate:
     """Graph-wide error handler (see `set_node_defaults` below): converts
@@ -24,6 +27,14 @@ def handle_node_error(state: TriageState, error: NodeError) -> TriageStateUpdate
     update, rather than crashing the run."""
     run_error = RunError(
         node_name=error.node, error_message=str(error.error), occurred_at=datetime.now(UTC)
+    )
+    log.error(
+        "node_failed",
+        node=error.node,
+        error=str(error.error),
+        run_id=str(state["run_meta"].run_id),
+        thread_id=state["run_meta"].thread_id,
+        exc_info=error.error,
     )
     updated_run_meta = state["run_meta"].model_copy(
         update={"errors": [*state["run_meta"].errors, run_error]}

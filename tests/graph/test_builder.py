@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import NodeError
+from structlog.testing import capture_logs
 
 from graph.builder import build_graph, handle_node_error
 from graph.schemas import IssuePayload, IssueSource, RunStatus
@@ -81,3 +82,20 @@ def test_handle_node_error_records_run_error_and_fails_run() -> None:
     assert len(errors) == 1
     assert errors[0].node_name == "planner"
     assert "boom" in errors[0].error_message
+
+
+def test_handle_node_error_logs_structured_error() -> None:
+    state = create_initial_state(make_issue(), max_iterations=10, max_cost_usd=1.0)
+    error = NodeError(node="planner", error=ValueError("boom"))
+
+    with capture_logs() as cap_logs:
+        handle_node_error(state, error)
+
+    assert len(cap_logs) == 1
+    entry = cap_logs[0]
+    assert entry["event"] == "node_failed"
+    assert entry["log_level"] == "error"
+    assert entry["node"] == "planner"
+    assert entry["error"] == "boom"
+    assert entry["run_id"] == str(state["run_meta"].run_id)
+    assert isinstance(entry["exc_info"], ValueError)
