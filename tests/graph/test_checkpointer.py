@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from graph.checkpointer import sqlite_checkpointer
 from graph.schemas import IssuePayload, IssueSource, RunStatus
 from graph.state import create_initial_state
 from tests.graph.nodes.conftest import make_fake_planner_node
+from tests.graph.test_state import make_fully_populated_state
 
 
 def make_issue() -> IssuePayload:
@@ -49,3 +51,23 @@ async def test_state_survives_reopening_the_same_db_file(
 
     assert snapshot.values["status"] == RunStatus.AUTO_POSTED
     assert snapshot.values["run_meta"].thread_id == state["run_meta"].thread_id
+
+
+async def test_sqlite_checkpointer_serde_allows_full_schema_round_trip_without_warnings(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`_build_checkpoint_serde`'s allow-list (derived from
+    `graph.schemas.__all__`) must cover every schema type nested in
+    `TriageState` — round-tripping a fully populated state must not trigger
+    LangGraph's "unregistered type" warning (which otherwise fires on every
+    custom type not explicitly allow-listed)."""
+    db_path = str(tmp_path / "checkpoints.db")
+    state = make_fully_populated_state()
+
+    async with sqlite_checkpointer(db_path) as checkpointer:
+        type_, payload = checkpointer.serde.dumps_typed(state)
+        with caplog.at_level(logging.WARNING):
+            restored = checkpointer.serde.loads_typed((type_, payload))
+
+    assert restored == state
+    assert "unregistered type" not in caplog.text.lower()
