@@ -10,7 +10,12 @@ from graph.state import TriageState, TriageStateUpdate
 
 class ResearcherNode(TriageNode):
     """Searches the codebase, docs, and web for context on the issue. Stub:
-    does no real research, just appends a placeholder trajectory message."""
+    does no real research, just appends a placeholder trajectory message.
+
+    Open question: top level messages is scoped for tool calls of this node
+    but other nodes will also have tool calls which makes this ambiguous
+    so need to think about how to scope messages and research findings.
+    """
 
     name: ClassVar[NodeName] = NodeName.RESEARCHER
 

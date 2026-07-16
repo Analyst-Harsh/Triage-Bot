@@ -37,9 +37,8 @@ async def main() -> None:
         log.info(
             "run_finished",
             thread_id=state["run_meta"].thread_id,
-            status=result["status"],
+            result=result,
         )
-        print(f"thread_id={state['run_meta'].thread_id} status={result['status']}")
 
 
 if __name__ == "__main__":
