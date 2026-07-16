@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from typing import ClassVar
 
 from graph.nodes.base import TriageNode
+from graph.nodes.node_names import NodeName
 from graph.schemas import CommentAction, DraftOutput, RunStatus
 from graph.state import TriageState, TriageStateUpdate
 
@@ -11,7 +12,7 @@ class DrafterNode(TriageNode):
     comment until the real drafting logic (and sandboxed code-fix path) is
     implemented."""
 
-    name: ClassVar[str] = "drafter"
+    name: ClassVar[NodeName] = NodeName.DRAFTER
 
     # `state` is unused in this stub; TriageNode.execute()'s signature
     # requires it (renaming breaks strict override typing, see base.py).

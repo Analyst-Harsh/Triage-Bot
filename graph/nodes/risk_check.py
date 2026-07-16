@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from typing import ClassVar
 
 from graph.nodes.base import TriageNode
+from graph.nodes.node_names import NodeName
 from graph.schemas import RiskAssessment, RiskLevel, RunStatus
 from graph.state import TriageState, TriageStateUpdate
 
@@ -11,7 +12,7 @@ class RiskCheckNode(TriageNode):
     reports LOW risk (auto-post path) until the real risk logic is
     implemented."""
 
-    name: ClassVar[str] = "risk_check"
+    name: ClassVar[NodeName] = NodeName.RISK_CHECK
 
     # `state` is unused in this stub; TriageNode.execute()'s signature
     # requires it (renaming breaks strict override typing, see base.py).

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
+from graph.nodes.node_names import NodeName
 from graph.state import TriageState, TriageStateUpdate
 
 
@@ -33,9 +34,9 @@ class TriageNode(ABC):
     not attribute access through `self`.
     """
 
-    name: ClassVar[str]
+    name: ClassVar[NodeName]
     """Canonical graph node name — used as the add_node() key and as
-    RunError.node_name on failure. Lowercase snake_case, e.g. "planner"."""
+    RunError.node_name on failure."""
 
     def __call__(self, state: TriageState) -> TriageStateUpdate:
         update = self.execute(state)
