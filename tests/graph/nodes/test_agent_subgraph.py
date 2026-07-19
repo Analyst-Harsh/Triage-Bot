@@ -181,3 +181,41 @@ async def test_summarize_node_parses_structured_output(triage_state: TriageState
 
     assert update.get("summary") == _StubSummary(note="found it")
     assert (update.get("summarize_cost") or 0.0) >= 0.0
+    assert update.get("messages") is None
+
+
+async def test_summarize_node_tolerates_unresolved_tool_call(triage_state: TriageState) -> None:
+    """Regression test: a parallel tool-call batch that straddles
+    `max_tool_calls` can leave a call `ToolCallLimitMiddleware` counted as
+    "allowed" with no matching `ToolMessage` (see
+    `resolve_dangling_tool_calls`). `summarize_node` must patch the
+    trajectory before calling out, or a real provider would reject the
+    unresolved tool_call outright — this exercises that path end to end."""
+    node = make_node()
+    dangling_call = AIMessage(
+        content="", tool_calls=[{"name": "search_code", "args": {}, "id": "call_1"}]
+    )
+    state = make_loop_state(triage_state, messages=[dangling_call])
+
+    update = await node.summarize_node(state)
+
+    assert update.get("summary") == _StubSummary(note="found it")
+
+
+def test_assemble_node_records_previously_dangling_tool_call(triage_state: TriageState) -> None:
+    """The other half of the regression: once patched, the dangling call
+    shows up in the derived records `finalize` receives, instead of
+    silently vanishing (as it did before `resolve_dangling_tool_calls`)."""
+    node = make_node()
+    dangling_call = AIMessage(
+        content="", tool_calls=[{"name": "search_code", "args": {}, "id": "call_1"}]
+    )
+    state = make_loop_state(triage_state, summary=_StubSummary(note="x"), messages=[dangling_call])
+
+    node.assemble_node(state)
+
+    assert len(node.finalize_calls) == 1
+    _, tool_calls = node.finalize_calls[0]
+    assert len(tool_calls) == 1
+    assert tool_calls[0].tool_name == "search_code"
+    assert tool_calls[0].status == "error"

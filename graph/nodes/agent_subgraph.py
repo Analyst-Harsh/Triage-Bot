@@ -13,7 +13,11 @@ from pydantic import BaseModel
 
 from config.settings import get_settings
 from graph.nodes.node_names import NodeName
-from graph.nodes.trajectory import derive_tool_call_records, estimate_trajectory_cost
+from graph.nodes.trajectory import (
+    derive_tool_call_records,
+    estimate_trajectory_cost,
+    resolve_dangling_tool_calls,
+)
 from graph.schemas import ToolCallRecord
 from graph.state import TriageState, TriageStateUpdate
 from llm.config import NodeLLMConfig
@@ -179,14 +183,23 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         )
 
     async def summarize_node(self, state: AgentLoopState) -> _LoopUpdate:
+        # A parallel tool-call batch that straddles the cap can leave some
+        # "allowed" calls counted by ToolCallLimitMiddleware but never
+        # actually run, with no ToolMessage — patch those in (transiently,
+        # correctly ordered) before this trajectory goes back to a model,
+        # or the call below fails outright on the unresolved tool_call. See
+        # `resolve_dangling_tool_calls`'s docstring for why this can't just
+        # be appended via the `messages` channel's reducer.
+        messages = resolve_dangling_tool_calls(state["messages"])
         result = await call_structured(
-            self._primary_model, self._fallback_model, state["messages"], self.summary_schema
+            self._primary_model, self._fallback_model, messages, self.summary_schema
         )
         return _LoopUpdate(summary=result.parsed, summarize_cost=result.estimated_cost_usd)
 
     def assemble_node(self, state: AgentLoopState) -> TriageStateUpdate:
-        tool_calls = derive_tool_call_records(state["messages"])
-        trajectory_cost = estimate_trajectory_cost(state["messages"])
+        messages = resolve_dangling_tool_calls(state["messages"])
+        tool_calls = derive_tool_call_records(messages)
+        trajectory_cost = estimate_trajectory_cost(messages)
         summarize_cost = state.get("summarize_cost", 0.0)
         # Set by summarize_node with `self.summary_schema`, so this is
         # always either None (short-circuit path) or a SummaryT instance —

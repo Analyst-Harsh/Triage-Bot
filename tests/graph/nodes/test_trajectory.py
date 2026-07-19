@@ -1,6 +1,11 @@
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from graph.nodes.trajectory import derive_tool_call_records, estimate_trajectory_cost
+from graph.nodes.trajectory import (
+    derive_tool_call_records,
+    estimate_trajectory_cost,
+    missing_tool_results,
+    resolve_dangling_tool_calls,
+)
 
 
 def make_ai_tool_call(
@@ -60,6 +65,104 @@ def test_derive_tool_call_records_preserves_order_across_multiple_calls() -> Non
     records = derive_tool_call_records(messages)
 
     assert [r.tool_name for r in records] == ["search_code", "web_search"]
+
+
+def test_missing_tool_results_returns_empty_when_every_call_resolved() -> None:
+    messages = [
+        make_ai_tool_call("search_code", {"query": "a"}, "call_1"),
+        ToolMessage(content="a result", tool_call_id="call_1", status="success"),
+    ]
+
+    assert missing_tool_results(messages) == []
+
+
+def test_missing_tool_results_synthesizes_error_message_for_unresolved_call() -> None:
+    """The scenario `ToolCallLimitMiddleware`'s `exit_behavior="end"` leaves
+    behind: an "allowed" call from a parallel batch that never actually ran
+    because the loop jumped straight to exit before reaching the tools
+    node, so it never got a real `ToolMessage`."""
+    messages = [make_ai_tool_call("search_code", {"query": "x"}, "call_1")]
+
+    patches = missing_tool_results(messages)
+
+    assert len(patches) == 1
+    patch = patches[0]
+    assert isinstance(patch, ToolMessage)
+    assert patch.tool_call_id == "call_1"
+    assert patch.name == "search_code"
+    assert patch.status == "error"
+
+
+def test_missing_tool_results_ignores_already_resolved_calls_in_mixed_batch() -> None:
+    messages = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "search_code", "args": {}, "id": "call_1"},
+                {"name": "web_search", "args": {}, "id": "call_2"},
+            ],
+        ),
+        ToolMessage(content="a result", tool_call_id="call_1", status="success"),
+    ]
+
+    patches = missing_tool_results(messages)
+
+    assert len(patches) == 1
+    assert patches[0].tool_call_id == "call_2"
+
+
+def test_resolve_dangling_tool_calls_returns_unchanged_when_nothing_dangling() -> None:
+    messages = [
+        make_ai_tool_call("search_code", {"query": "a"}, "call_1"),
+        ToolMessage(content="a result", tool_call_id="call_1", status="success"),
+    ]
+
+    assert resolve_dangling_tool_calls(messages) == messages
+
+
+def test_resolve_dangling_tool_calls_closes_the_gap_in_derive_tool_call_records() -> None:
+    """Once the synthetic patch is spliced into the trajectory, the
+    previously-dropped call becomes a proper (error) record instead of
+    silently vanishing."""
+    messages = [make_ai_tool_call("search_code", {"query": "x"}, "call_1")]
+
+    records = derive_tool_call_records(resolve_dangling_tool_calls(messages))
+
+    assert len(records) == 1
+    assert records[0].tool_name == "search_code"
+    assert records[0].status == "error"
+
+
+def test_resolve_dangling_tool_calls_inserts_immediately_after_owning_ai_message() -> None:
+    """The exact scenario `ToolCallLimitMiddleware`'s `exit_behavior="end"`
+    produces: one call in a parallel batch gets blocked (real synthetic
+    ToolMessage + a final AIMessage appended by the middleware itself)
+    while a sibling call in the *same* AIMessage was "allowed" but never
+    executed. Simply appending the missing patch at the very end would put
+    it after the middleware's own trailing messages — still invalid for
+    both OpenAI and Anthropic, which require every tool_call in an
+    assistant message to be resolved before the next non-tool message.
+    """
+    turn = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "search_code", "args": {}, "id": "allowed_call"},
+            {"name": "web_search", "args": {}, "id": "blocked_call"},
+        ],
+    )
+    blocked_result = ToolMessage(
+        content="Tool call limit exceeded.", tool_call_id="blocked_call", status="error"
+    )
+    final = AIMessage(content="Tool call limit reached.")
+    messages = [turn, blocked_result, final]
+
+    resolved = resolve_dangling_tool_calls(messages)
+
+    assert resolved[0] is turn
+    assert isinstance(resolved[1], ToolMessage)
+    assert resolved[1].tool_call_id == "allowed_call"
+    assert resolved[2] is blocked_result
+    assert resolved[3] is final
 
 
 def test_estimate_trajectory_cost_sums_ai_message_usage() -> None:

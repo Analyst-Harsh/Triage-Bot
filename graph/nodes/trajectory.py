@@ -38,6 +38,73 @@ def derive_tool_call_records(messages: Sequence[BaseMessage]) -> list[ToolCallRe
     return records
 
 
+def missing_tool_results(messages: Sequence[BaseMessage]) -> list[ToolMessage]:
+    """Synthesizes a `ToolMessage` for every `AIMessage.tool_calls` entry
+    that has no matching response in `messages`.
+
+    This happens when `ToolCallLimitMiddleware` (`exit_behavior="end"`)
+    blocks part of a parallel tool-call batch: it jumps straight to exit
+    without ever reaching the tools node, so even the calls it counted as
+    "allowed" never actually run and never get a `ToolMessage`. Left as-is,
+    that dangling `tool_call_id` breaks the next model call outright — both
+    OpenAI and Anthropic reject an assistant message with an unresolved
+    tool call. Building block for `resolve_dangling_tool_calls`; see there
+    for how these get placed back into a trajectory.
+    """
+    resolved_ids = {msg.tool_call_id for msg in messages if isinstance(msg, ToolMessage)}
+    missing: list[ToolMessage] = []
+    for msg in messages:
+        if not isinstance(msg, AIMessage):
+            continue
+        for call in msg.tool_calls:
+            call_id = call["id"]
+            if call_id is not None and call_id not in resolved_ids:
+                missing.append(
+                    ToolMessage(
+                        content=(
+                            "Tool call not executed: the tool-call limit was "
+                            "reached before this call could run."
+                        ),
+                        tool_call_id=call_id,
+                        name=call["name"],
+                        status="error",
+                    )
+                )
+    return missing
+
+
+def resolve_dangling_tool_calls(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
+    """Returns a new trajectory with a synthetic `ToolMessage` (see
+    `missing_tool_results`) spliced in immediately after the `AIMessage`
+    that owns each unresolved tool call — i.e. exactly where a real
+    `ToolMessage` would have landed, so every tool call is resolved before
+    the next non-tool message. Simply appending the patches to the end (via
+    the `messages` channel's `add_messages` reducer, say) would put them
+    *after* whatever the loop already appended following that turn (e.g.
+    `ToolCallLimitMiddleware`'s own synthetic message for a sibling blocked
+    call, plus its final `AIMessage`) — still an invalid ordering for both
+    OpenAI and Anthropic.
+
+    Purely transient: used to build the message list handed to a fresh
+    model call (`AgentSubgraph.summarize_node`) or to
+    `derive_tool_call_records`. Never written back into the checkpointed
+    `messages` channel — that stays a faithful record of what actually
+    happened, cap included.
+    """
+    patches_by_call_id = {patch.tool_call_id: patch for patch in missing_tool_results(messages)}
+    resolved: list[BaseMessage] = []
+    for msg in messages:
+        resolved.append(msg)
+        if not isinstance(msg, AIMessage):
+            continue
+        for call in msg.tool_calls:
+            call_id = call["id"]
+            patch = patches_by_call_id.get(call_id) if call_id is not None else None
+            if patch is not None:
+                resolved.append(patch)
+    return resolved
+
+
 def estimate_trajectory_cost(messages: Sequence[BaseMessage]) -> float:
     """Sums the cost of every model call in a trajectory, reading each
     `AIMessage`'s own `usage_metadata` (populated by the provider on the raw
