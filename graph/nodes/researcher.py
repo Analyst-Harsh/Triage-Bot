@@ -59,8 +59,10 @@ class ResearcherSubgraph(AgentSubgraph[ResearchSummary]):
 
     # `state` is unused here; the base class's finalize() signature requires
     # it for subclasses that do need it (renaming breaks strict override
-    # typing, see base.py's precedent for this same pattern).
-    def finalize(
+    # typing, see base.py's precedent for this same pattern). Async per the
+    # base ABC's signature; this override does no I/O, so it's a plain
+    # no-await coroutine.
+    async def finalize(
         self,
         summary: ResearchSummary | None,
         tool_calls: list[ToolCallRecord],

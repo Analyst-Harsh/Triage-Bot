@@ -95,11 +95,11 @@ def test_prepare_raises_when_planner_output_missing() -> None:
         node.prepare(state)
 
 
-def test_finalize_with_none_summary_returns_minimal_findings() -> None:
+async def test_finalize_with_none_summary_returns_minimal_findings() -> None:
     node = make_researcher()
     state = make_state(make_planner_output(investigation_plan=[]))
 
-    update = node.finalize(None, [], state)
+    update = await node.finalize(None, [], state)
 
     findings = update.get("research_findings")
     assert findings is not None
@@ -107,7 +107,7 @@ def test_finalize_with_none_summary_returns_minimal_findings() -> None:
     assert findings.evidence == []
 
 
-def test_finalize_maps_summary_fields_into_findings() -> None:
+async def test_finalize_maps_summary_fields_into_findings() -> None:
     node = make_researcher()
     summary = ResearchSummary(
         summary="Found the bug.",
@@ -118,7 +118,7 @@ def test_finalize_maps_summary_fields_into_findings() -> None:
     )
     state = make_state(make_planner_output())
 
-    update = node.finalize(summary, [], state)
+    update = await node.finalize(summary, [], state)
 
     findings = update.get("research_findings")
     assert findings is not None
@@ -127,7 +127,7 @@ def test_finalize_maps_summary_fields_into_findings() -> None:
     assert findings.focus_addressed == ["search codebase for NoneType"]
 
 
-def test_finalize_adds_gap_when_tool_call_cap_hit() -> None:
+async def test_finalize_adds_gap_when_tool_call_cap_hit() -> None:
     node = make_researcher()
     summary = ResearchSummary(summary="x", confidence=0.5)
     state = make_state(make_planner_output())
@@ -136,38 +136,38 @@ def test_finalize_adds_gap_when_tool_call_cap_hit() -> None:
         for _ in range(node.max_tool_calls)
     ]
 
-    update = node.finalize(summary, tool_calls, state)
+    update = await node.finalize(summary, tool_calls, state)
 
     findings = update.get("research_findings")
     assert findings is not None
     assert any("budget" in gap for gap in findings.gaps)
 
 
-def test_finalize_adds_gap_when_docmind_unconfigured() -> None:
+async def test_finalize_adds_gap_when_docmind_unconfigured() -> None:
     node = make_researcher(settings=Settings(docmind_mcp_command=None))
     summary = ResearchSummary(summary="x", confidence=0.5)
     state = make_state(make_planner_output())
 
-    update = node.finalize(summary, [], state)
+    update = await node.finalize(summary, [], state)
 
     findings = update.get("research_findings")
     assert findings is not None
     assert any("DocMind" in gap for gap in findings.gaps)
 
 
-def test_finalize_no_docmind_gap_when_configured() -> None:
+async def test_finalize_no_docmind_gap_when_configured() -> None:
     node = make_researcher(settings=Settings(docmind_mcp_command="docmind-mcp"))
     summary = ResearchSummary(summary="x", confidence=0.5)
     state = make_state(make_planner_output())
 
-    update = node.finalize(summary, [], state)
+    update = await node.finalize(summary, [], state)
 
     findings = update.get("research_findings")
     assert findings is not None
     assert not any("DocMind" in gap for gap in findings.gaps)
 
 
-def test_finalize_derives_tools_used_from_tool_calls() -> None:
+async def test_finalize_derives_tools_used_from_tool_calls() -> None:
     node = make_researcher()
     summary = ResearchSummary(summary="x", confidence=0.5)
     state = make_state(make_planner_output())
@@ -176,7 +176,7 @@ def test_finalize_derives_tools_used_from_tool_calls() -> None:
         ToolCallRecord(tool_name="web_search", arguments={}, status="success"),
     ]
 
-    update = node.finalize(summary, tool_calls, state)
+    update = await node.finalize(summary, tool_calls, state)
 
     findings = update.get("research_findings")
     assert findings is not None

@@ -2,7 +2,7 @@ from graph.nodes.agent_subgraph import AgentSubgraph
 from graph.nodes.approval_queue import ApprovalQueueNode
 from graph.nodes.auto_post import AutoPostNode
 from graph.nodes.base import TriageNode
-from graph.nodes.drafter import DrafterNode
+from graph.nodes.drafter import DrafterSubgraph
 from graph.nodes.llm_node import LLMNode
 from graph.nodes.planner import PlannerNode
 from graph.nodes.researcher import ResearcherSubgraph
@@ -13,7 +13,7 @@ __all__ = [
     "AgentSubgraph",
     "ApprovalQueueNode",
     "AutoPostNode",
-    "DrafterNode",
+    "DrafterSubgraph",
     "LLMNode",
     "PlannerNode",
     "ResearcherSubgraph",

@@ -111,7 +111,7 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def finalize(
+    async def finalize(
         self,
         summary: SummaryT | None,
         tool_calls: list[ToolCallRecord],
@@ -121,9 +121,18 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         the derived tool-call records into this node's output slot and
         `status`. Run-meta bookkeeping (cost, `tool_calls_made`,
         `iteration_count`) is applied by `_assemble_node` after this
-        returns — don't set `run_meta` here; a `run_meta` update this method
-        does set is still respected as the base to accumulate onto (same
-        contract as `TriageNode.execute()`)."""
+        returns — don't set `run_meta` here unless accumulating your own
+        cost on top of it first; a `run_meta` update this method does set is
+        still respected as the base `_assemble_node` accumulates onto (same
+        contract as `TriageNode.execute()`).
+
+        Async so a subclass can make its own independent LLM call here — e.g.
+        the Drafter's grounding self-check, a second structured-output call
+        genuinely separate from the one that produced `summary` (an
+        evaluator-optimizer pattern: a model is a much weaker judge of its
+        own claims in the same breath it wrote them). Subclasses that need no
+        I/O here (the common case) just don't `await` anything — a
+        no-await async function behaves identically to a sync one."""
         raise NotImplementedError
 
     def compile(self) -> CompiledStateGraph[AgentLoopState, None, AgentLoopState, AgentLoopState]:
@@ -196,7 +205,7 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         )
         return _LoopUpdate(summary=result.parsed, summarize_cost=result.estimated_cost_usd)
 
-    def assemble_node(self, state: AgentLoopState) -> TriageStateUpdate:
+    async def assemble_node(self, state: AgentLoopState) -> TriageStateUpdate:
         messages = resolve_dangling_tool_calls(state["messages"])
         tool_calls = derive_tool_call_records(messages)
         trajectory_cost = estimate_trajectory_cost(messages)
@@ -207,7 +216,7 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         # against summary_schema when call_structured parsed it.
         summary = cast(SummaryT | None, state.get("summary"))
 
-        update = self.finalize(summary, tool_calls, state)
+        update = await self.finalize(summary, tool_calls, state)
 
         run_meta = update.get("run_meta", state["run_meta"])
         cap_hit = len(tool_calls) >= self.max_tool_calls

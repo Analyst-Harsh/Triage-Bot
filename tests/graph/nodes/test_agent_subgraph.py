@@ -47,7 +47,7 @@ class _StubAgentSubgraph(AgentSubgraph[_StubSummary]):
     def prepare(self, state: TriageState) -> list[BaseMessage] | None:  # noqa: ARG002
         return self._prepare_result
 
-    def finalize(
+    async def finalize(
         self,
         summary: _StubSummary | None,
         tool_calls: list[ToolCallRecord],
@@ -114,12 +114,14 @@ def test_route_after_prepare_with_messages_goes_to_agent(triage_state: TriageSta
     assert route == "agent"
 
 
-def test_assemble_node_calls_finalize_with_derived_tool_calls(triage_state: TriageState) -> None:
+async def test_assemble_node_calls_finalize_with_derived_tool_calls(
+    triage_state: TriageState,
+) -> None:
     node = make_node()
     summary = _StubSummary(note="x")
     state = make_loop_state(triage_state, summary=summary, messages=[])
 
-    node.assemble_node(state)
+    await node.assemble_node(state)
 
     assert len(node.finalize_calls) == 1
     called_summary, called_tool_calls = node.finalize_calls[0]
@@ -127,13 +129,13 @@ def test_assemble_node_calls_finalize_with_derived_tool_calls(triage_state: Tria
     assert called_tool_calls == []
 
 
-def test_assemble_node_bumps_iteration_count_and_tool_calls_made(
+async def test_assemble_node_bumps_iteration_count_and_tool_calls_made(
     triage_state: TriageState,
 ) -> None:
     node = make_node()
     state = make_loop_state(triage_state, summary=_StubSummary(note="x"), messages=[])
 
-    update = node.assemble_node(state)
+    update = await node.assemble_node(state)
 
     run_meta = update.get("run_meta")
     assert run_meta is not None
@@ -141,7 +143,7 @@ def test_assemble_node_bumps_iteration_count_and_tool_calls_made(
     assert run_meta.tool_calls_made == triage_state["run_meta"].tool_calls_made
 
 
-def test_assemble_node_logs_cap_hit_when_at_or_over_limit(triage_state: TriageState) -> None:
+async def test_assemble_node_logs_cap_hit_when_at_or_over_limit(triage_state: TriageState) -> None:
     node = make_node()
     messages: list[BaseMessage] = []
     for i in range(node.max_tool_calls):
@@ -155,19 +157,19 @@ def test_assemble_node_logs_cap_hit_when_at_or_over_limit(triage_state: TriageSt
     state = make_loop_state(triage_state, summary=_StubSummary(note="x"), messages=messages)
 
     with capture_logs(processors=[structlog.contextvars.merge_contextvars]) as cap_logs:
-        node.assemble_node(state)
+        await node.assemble_node(state)
 
     finished = next(entry for entry in cap_logs if entry["event"] == "agent_subgraph_finished")
     assert finished["cap_hit"] is True
     assert finished["tool_call_count"] == node.max_tool_calls
 
 
-def test_assemble_node_does_not_log_cap_hit_under_limit(triage_state: TriageState) -> None:
+async def test_assemble_node_does_not_log_cap_hit_under_limit(triage_state: TriageState) -> None:
     node = make_node()
     state = make_loop_state(triage_state, summary=_StubSummary(note="x"), messages=[])
 
     with capture_logs(processors=[structlog.contextvars.merge_contextvars]) as cap_logs:
-        node.assemble_node(state)
+        await node.assemble_node(state)
 
     finished = next(entry for entry in cap_logs if entry["event"] == "agent_subgraph_finished")
     assert finished["cap_hit"] is False
@@ -202,7 +204,9 @@ async def test_summarize_node_tolerates_unresolved_tool_call(triage_state: Triag
     assert update.get("summary") == _StubSummary(note="found it")
 
 
-def test_assemble_node_records_previously_dangling_tool_call(triage_state: TriageState) -> None:
+async def test_assemble_node_records_previously_dangling_tool_call(
+    triage_state: TriageState,
+) -> None:
     """The other half of the regression: once patched, the dangling call
     shows up in the derived records `finalize` receives, instead of
     silently vanishing (as it did before `resolve_dangling_tool_calls`)."""
@@ -212,7 +216,7 @@ def test_assemble_node_records_previously_dangling_tool_call(triage_state: Triag
     )
     state = make_loop_state(triage_state, summary=_StubSummary(note="x"), messages=[dangling_call])
 
-    node.assemble_node(state)
+    await node.assemble_node(state)
 
     assert len(node.finalize_calls) == 1
     _, tool_calls = node.finalize_calls[0]

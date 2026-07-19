@@ -38,3 +38,12 @@ DraftAction = Annotated[
     CommentAction | LabelAction | CloseAction | CodeFixAction,
     Field(discriminator="action_type"),
 ]
+
+NonCodeDraftAction = Annotated[
+    CommentAction | LabelAction | CloseAction,
+    Field(discriminator="action_type"),
+]
+"""Restricted to the actions the Drafter can propose before a code-fix sandbox
+exists — the LLM-facing schema for drafting is typed against this, not the
+full `DraftAction`, so it cannot type its way into emitting `code_fix` without
+a real `SandboxResult` behind it."""

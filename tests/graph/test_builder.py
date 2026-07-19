@@ -9,7 +9,7 @@ import graph.builder as builder_module
 from graph.builder import build_graph, handle_node_error
 from graph.schemas import IssuePayload, IssueSource, RunStatus
 from graph.state import create_initial_state
-from tests.graph.nodes.conftest import make_fake_planner_node
+from tests.graph.nodes.conftest import make_fake_drafter_subgraph, make_fake_planner_node
 
 
 def make_issue() -> IssuePayload:
@@ -44,6 +44,10 @@ async def test_invoke_flows_through_all_nodes_to_auto_post(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(builder_module, "PlannerNode", make_fake_planner_node)
+    # DrafterSubgraph never short-circuits (drafting always happens, unlike
+    # the Researcher's empty-investigation-plan skip) -- without this fake it
+    # would make a real LLM call during this test.
+    monkeypatch.setattr(builder_module, "DrafterSubgraph", make_fake_drafter_subgraph)
     graph = build_graph()
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
