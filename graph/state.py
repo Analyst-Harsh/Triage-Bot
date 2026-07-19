@@ -1,9 +1,6 @@
 from datetime import UTC, datetime
-from typing import Annotated, TypedDict
+from typing import TypedDict
 from uuid import uuid4
-
-from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
 
 from graph.schemas import (
     DraftOutput,
@@ -19,7 +16,6 @@ from graph.schemas import (
 
 class TriageState(TypedDict):
     issue: IssuePayload
-    messages: Annotated[list[BaseMessage], add_messages]
     planner_output: PlannerOutput | None
     research_findings: ResearchFindings | None
     draft: DraftOutput | None
@@ -37,7 +33,6 @@ class TriageStateUpdate(TypedDict, total=False):
     actually writes.
     """
 
-    messages: list[BaseMessage]
     planner_output: PlannerOutput | None
     research_findings: ResearchFindings | None
     draft: DraftOutput | None
@@ -56,7 +51,6 @@ def create_initial_state(
     thread_id = f"{issue.repo_full_name}#{issue.issue_number}"
     return TriageState(
         issue=issue,
-        messages=[],
         planner_output=None,
         research_findings=None,
         draft=None,

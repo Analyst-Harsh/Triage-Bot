@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 import structlog
+from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import NodeError
 from langgraph.graph import END, START, StateGraph
@@ -11,7 +12,7 @@ from graph.nodes import (
     AutoPostNode,
     DrafterNode,
     PlannerNode,
-    ResearcherNode,
+    ResearcherSubgraph,
     RiskCheckNode,
     route_by_risk,
 )
@@ -44,17 +45,26 @@ def handle_node_error(state: TriageState, error: NodeError) -> TriageStateUpdate
 
 def build_graph(
     checkpointer: BaseCheckpointSaver[str] | None = None,
+    *,
+    researcher_tools: list[BaseTool] | None = None,
 ) -> CompiledStateGraph[TriageState]:
     """Wires the Planner -> Researcher -> Drafter -> Risk check ->
     (auto-post | approval queue) pipeline.
 
-    Every node here is a `TriageNode` (see `graph/nodes/base.py`). A future
-    subgraph-backed node (e.g. Researcher's tool-calling loop) would instead
-    be its own compiled `StateGraph(TriageState)` registered directly via
-    `add_node(name, compiled_subgraph)` — bypassing `TriageNode` entirely so
-    LangGraph's automatic subgraph detection (checkpoint namespacing, nested
-    streaming) applies. It still gets `handle_node_error` for free, since
-    `set_node_defaults` applies to any node regardless of what its action is.
+    Stays synchronous and does no I/O: `researcher_tools` (MCP/Tavily tools,
+    inherently async to load) is injected by the composition root (`main.py`,
+    via `tools.mcp_clients.researcher_toolset()`) rather than loaded here —
+    graph construction doing network calls would be an architecture smell,
+    and this is also what keeps this function's own tests network-free.
+    `None`/empty means a zero-tool Researcher (still runs, low confidence).
+
+    Every simple node here is a `TriageNode` (see `graph/nodes/base.py`).
+    The Researcher is an `AgentSubgraph` instead — its own compiled
+    `StateGraph` registered directly via `add_node(name, compiled_subgraph)`,
+    bypassing `TriageNode` entirely so LangGraph's automatic subgraph
+    detection (checkpoint namespacing, nested streaming) applies. It still
+    gets `handle_node_error` for free, since `set_node_defaults` applies to
+    any node regardless of what its action is.
     """
     workflow = StateGraph(TriageState).set_node_defaults(  # pyright: ignore[reportUnknownMemberType]
         error_handler=handle_node_error,  # pyright: ignore[reportArgumentType]
@@ -62,14 +72,17 @@ def build_graph(
 
     # Nodes
     planner = PlannerNode()
-    researcher = ResearcherNode()
+    researcher = ResearcherSubgraph(researcher_tools or [])
     drafter = DrafterNode()
     risk_check = RiskCheckNode()
     auto_post = AutoPostNode()
     approval_queue = ApprovalQueueNode()
 
-    # Add Nodes and edges.
-    for node in (planner, researcher, drafter, risk_check, auto_post, approval_queue):
+    # Add nodes and edges. The Researcher's compiled subgraph is what gets
+    # registered under its name, not the `AgentSubgraph` instance itself.
+    workflow.add_node(planner.name, planner)  # pyright: ignore[reportUnknownMemberType]
+    workflow.add_node(researcher.name, researcher.compile())  # pyright: ignore[reportUnknownMemberType]
+    for node in (drafter, risk_check, auto_post, approval_queue):
         workflow.add_node(node.name, node)  # pyright: ignore[reportUnknownMemberType]
 
     workflow.add_edge(START, planner.name)

@@ -62,7 +62,6 @@ async def test_invoke_flows_through_all_nodes_to_auto_post(
     assert result["research_findings"] is not None
     assert result["draft"] is not None
     assert result["risk_assessment"] is not None
-    assert len(result["messages"]) == 1
     assert result["run_meta"].iteration_count == 5
 
 
