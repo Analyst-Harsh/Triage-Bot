@@ -5,6 +5,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from graph.schemas import (
     ActionType,
     CodeFixAction,
+    DraftedAction,
     DraftOutput,
     EpisodicMemoryHit,
     Evidence,
@@ -72,17 +73,23 @@ def make_fully_populated_state() -> TriageState:
         researched_at=datetime.now(UTC),
     )
     state["draft"] = DraftOutput(
-        action=CodeFixAction(
-            diff="--- a/src/config.py\n+++ b/src/config.py\n",
-            target_files=["src/config.py"],
-            sandbox_result=SandboxResult(
-                passed=True,
-                logs="1 passed in 0.42s",
-                test_command="pytest tests/test_config.py",
-                duration_seconds=0.42,
-            ),
-        ),
-        rationale="Reproduced the crash and verified the fix in sandbox.",
+        actions=[
+            DraftedAction(
+                action=CodeFixAction(
+                    diff="--- a/src/config.py\n+++ b/src/config.py\n",
+                    target_files=["src/config.py"],
+                    sandbox_result=SandboxResult(
+                        passed=True,
+                        logs="1 passed in 0.42s",
+                        test_command="pytest tests/test_config.py",
+                        duration_seconds=0.42,
+                    ),
+                ),
+                rationale="Reproduced the crash and verified the fix in sandbox.",
+            )
+        ],
+        overall_rationale="Reproduced the crash and verified the fix in sandbox.",
+        unsupported_claims=[],
         drafted_at=datetime.now(UTC),
     )
     state["risk_assessment"] = RiskAssessment(

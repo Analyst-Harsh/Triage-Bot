@@ -4,9 +4,10 @@ from graph.schemas.actions import (
     CommentAction,
     DraftAction,
     LabelAction,
+    NonCodeDraftAction,
     SandboxResult,
 )
-from graph.schemas.draft import DraftOutput
+from graph.schemas.draft import DraftedAction, DraftOutput, DraftProposal, ProposedAction
 from graph.schemas.enums import (
     ActionType,
     IssueSource,
@@ -14,6 +15,7 @@ from graph.schemas.enums import (
     RiskLevel,
     RunStatus,
 )
+from graph.schemas.grounding import GroundingCritique
 from graph.schemas.issue import IssuePayload
 from graph.schemas.memory import EpisodicMemoryHit
 from graph.schemas.planner import PlannerClassification, PlannerOutput
@@ -28,14 +30,19 @@ __all__ = [
     "CommentAction",
     "DraftAction",
     "DraftOutput",
+    "DraftProposal",
+    "DraftedAction",
     "EpisodicMemoryHit",
     "Evidence",
+    "GroundingCritique",
     "IssuePayload",
     "IssueSource",
     "IssueType",
     "LabelAction",
+    "NonCodeDraftAction",
     "PlannerClassification",
     "PlannerOutput",
+    "ProposedAction",
     "ResearchFindings",
     "ResearchSummary",
     "RiskAssessment",

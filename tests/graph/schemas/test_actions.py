@@ -7,10 +7,12 @@ from graph.schemas import (
     CommentAction,
     DraftAction,
     LabelAction,
+    NonCodeDraftAction,
     SandboxResult,
 )
 
 draft_action_adapter: TypeAdapter[DraftAction] = TypeAdapter(DraftAction)
+non_code_draft_action_adapter: TypeAdapter[NonCodeDraftAction] = TypeAdapter(NonCodeDraftAction)
 
 
 def test_comment_action_round_trip() -> None:
@@ -64,3 +66,38 @@ def test_unknown_action_type_is_rejected() -> None:
     payload = {"action_type": "delete_repo"}
     with pytest.raises(ValidationError):
         draft_action_adapter.validate_python(payload)
+
+
+def test_non_code_comment_action_round_trip() -> None:
+    action = CommentAction(comment_body="Thanks for the report!")
+    restored = non_code_draft_action_adapter.validate_python(action.model_dump())
+    assert isinstance(restored, CommentAction)
+    assert restored == action
+
+
+def test_non_code_label_action_round_trip() -> None:
+    action = LabelAction(labels_to_add=["needs-triage"], labels_to_remove=["stale"])
+    restored = non_code_draft_action_adapter.validate_python(action.model_dump())
+    assert isinstance(restored, LabelAction)
+
+
+def test_non_code_close_action_round_trip() -> None:
+    action = CloseAction(reason="duplicate", close_comment="Duplicate of #10")
+    restored = non_code_draft_action_adapter.validate_python(action.model_dump())
+    assert isinstance(restored, CloseAction)
+
+
+def test_non_code_draft_action_rejects_code_fix() -> None:
+    payload = {
+        "action_type": "code_fix",
+        "diff": "--- a/foo.py\n+++ b/foo.py\n",
+        "target_files": ["foo.py"],
+        "sandbox_result": {
+            "passed": True,
+            "logs": "1 passed",
+            "test_command": "pytest tests/test_foo.py",
+            "duration_seconds": 1.23,
+        },
+    }
+    with pytest.raises(ValidationError):
+        non_code_draft_action_adapter.validate_python(payload)

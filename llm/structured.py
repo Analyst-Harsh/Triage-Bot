@@ -33,9 +33,18 @@ async def call_structured[T](
     Extracted from `LLMNode.call_structured` so agent-subgraph nodes (e.g.
     the Researcher's post-loop summarize step) get the same
     fallback+cost-accounting guarantees without going through `TriageNode`.
+
+    `method="function_calling"` (rather than the newer default strict
+    `"json_schema"` mode) because OpenAI's strict Structured Outputs schema
+    validation rejects `oneOf` outright — which is exactly what a Pydantic
+    discriminated union (e.g. `DraftAction`) compiles to. Tool/function-call
+    based structured output has no such restriction and is supported
+    uniformly across providers, so this is the one method that works for
+    every schema shape this function is asked to handle, not just the flat
+    ones used before the Drafter's discriminated-union schemas existed.
     """
-    primary_structured = primary.with_structured_output(schema)
-    fallback_structured = fallback.with_structured_output(schema)
+    primary_structured = primary.with_structured_output(schema, method="function_calling")
+    fallback_structured = fallback.with_structured_output(schema, method="function_calling")
     runnable = primary_structured.with_fallbacks([fallback_structured])
     with get_usage_metadata_callback() as cb:
         # with_structured_output()'s return type is loosely

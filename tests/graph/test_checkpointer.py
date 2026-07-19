@@ -11,7 +11,7 @@ from graph.builder import build_graph
 from graph.checkpointer import sqlite_checkpointer
 from graph.schemas import IssuePayload, IssueSource, RunStatus
 from graph.state import create_initial_state
-from tests.graph.nodes.conftest import make_fake_planner_node
+from tests.graph.nodes.conftest import make_fake_drafter_subgraph, make_fake_planner_node
 from tests.graph.test_state import make_fully_populated_state
 
 
@@ -36,6 +36,10 @@ async def test_state_survives_reopening_the_same_db_file(
     second connection against the same file. `MemorySaver` couldn't do this
     at all — it loses everything once the process/connection is gone."""
     monkeypatch.setattr(builder_module, "PlannerNode", make_fake_planner_node)
+    # DrafterSubgraph never short-circuits (drafting always happens, unlike
+    # the Researcher's empty-investigation-plan skip) -- without this fake it
+    # would make a real LLM call during this test.
+    monkeypatch.setattr(builder_module, "DrafterSubgraph", make_fake_drafter_subgraph)
     db_path = str(tmp_path / "checkpoints.db")
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
