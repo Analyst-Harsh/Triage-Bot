@@ -16,11 +16,15 @@ class DrafterNode(TriageNode):
     `graph/schemas/actions.py`): does verifying a fix need an iterative
     LLM tool-calling loop (propose diff -> run tests via a bound tool ->
     see failure -> revise -> retry)? If so it's structurally identical to
-    Researcher's tool-calling loop and should get the same treatment (its
-    own compiled subgraph, `AIMessage(tool_calls=...)`/`ToolMessage` pairs
-    flowing into top-level `messages` for trajectory evals). Or is a single
-    procedural sandbox run enough (generate one diff, run it once, capture
-    pass/fail)? `CodeFixAction.sandbox_result` is currently a single flat
+    the Researcher's tool-calling loop and should reuse the same
+    abstraction: a second `AgentSubgraph` subclass (see
+    `graph/nodes/agent_subgraph.py` and `graph/nodes/researcher.py`), with
+    its own private trajectory channel — never top-level `TriageState`, see
+    `AgentLoopState`'s docstring for why. Or is a single procedural sandbox
+    run enough (generate one diff, run it once, capture pass/fail)? If so
+    this stays a plain `TriageNode`, and can still reuse
+    `graph/nodes/trajectory.py`'s helpers directly.
+    `CodeFixAction.sandbox_result` is currently a single flat
     `SandboxResult`, not a `list[SandboxResult]`, which fits the
     single-shot reading — but that shape hasn't been deliberately chosen
     with this question in mind, so don't treat it as a decision already

@@ -1,6 +1,5 @@
 from datetime import UTC, datetime
 
-from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from graph.schemas import (
@@ -8,16 +7,17 @@ from graph.schemas import (
     CodeFixAction,
     DraftOutput,
     EpisodicMemoryHit,
+    Evidence,
     IssuePayload,
     IssueSource,
     IssueType,
     PlannerOutput,
     ResearchFindings,
-    ResearchSource,
     RiskAssessment,
     RiskLevel,
     RunStatus,
     SandboxResult,
+    ToolCallRecord,
 )
 from graph.state import TriageState, create_initial_state
 
@@ -42,10 +42,6 @@ def make_fully_populated_state() -> TriageState:
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=15, max_cost_usd=2.5)
 
-    state["messages"] = [
-        HumanMessage(content="Investigate this issue."),
-        AIMessage(content="Searching codebase for related error handling."),
-    ]
     state["planner_output"] = PlannerOutput(
         issue_type=IssueType.BUG,
         classification_confidence=0.87,
@@ -55,17 +51,25 @@ def make_fully_populated_state() -> TriageState:
     )
     state["research_findings"] = ResearchFindings(
         summary="Missing null check in the config loader.",
-        sources=[
-            ResearchSource(
-                source_type="codebase",
+        evidence=[
+            Evidence(
+                source_type="docmind",
                 reference="src/config.py:12",
                 snippet="config = load_config()",
                 relevance=0.95,
+                sha="deadbeef",
             )
         ],
-        code_references=["src/config.py"],
+        focus_addressed=["search codebase for NoneType"],
+        gaps=[],
         confidence=0.9,
-        open_questions=[],
+        tool_calls=[
+            ToolCallRecord(
+                tool_name="search_code", arguments={"query": "NoneType"}, status="success"
+            )
+        ],
+        tools_used=["docmind"],
+        researched_at=datetime.now(UTC),
     )
     state["draft"] = DraftOutput(
         action=CodeFixAction(
@@ -109,7 +113,6 @@ def test_create_initial_state_defaults() -> None:
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
 
     assert state["issue"] == issue
-    assert state["messages"] == []
     assert state["planner_output"] is None
     assert state["research_findings"] is None
     assert state["draft"] is None

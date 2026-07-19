@@ -4,10 +4,12 @@ import structlog
 from langchain_core.runnables import RunnableConfig
 
 from api.github_client import build_github_client, fetch_issue
+from config.settings import get_settings
 from graph.builder import build_graph
 from graph.checkpointer import sqlite_checkpointer
 from graph.state import create_initial_state
 from observability.logging_config import configure_logging
+from tools.mcp_clients import researcher_toolset
 
 REPO_FULL_NAME = "octocat/Hello-World"
 ISSUE_NUMBER = 1
@@ -28,8 +30,11 @@ async def main() -> None:
         run_id=str(state["run_meta"].run_id),
     )
 
-    async with sqlite_checkpointer() as checkpointer:
-        graph = build_graph(checkpointer=checkpointer)
+    async with (
+        sqlite_checkpointer() as checkpointer,
+        researcher_toolset(get_settings()) as tools,
+    ):
+        graph = build_graph(checkpointer=checkpointer, researcher_tools=tools)
         # langgraph's ainvoke() overloads resolve to a partially-Unknown type
         # under strict pyright — a library generics gap, same as the
         # `.invoke()` ignore in tests/graph/test_builder.py, not ours.

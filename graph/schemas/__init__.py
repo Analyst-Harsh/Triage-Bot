@@ -17,7 +17,7 @@ from graph.schemas.enums import (
 from graph.schemas.issue import IssuePayload
 from graph.schemas.memory import EpisodicMemoryHit
 from graph.schemas.planner import PlannerClassification, PlannerOutput
-from graph.schemas.research import ResearchFindings, ResearchSource
+from graph.schemas.research import Evidence, ResearchFindings, ResearchSummary, ToolCallRecord
 from graph.schemas.risk import RiskAssessment
 from graph.schemas.run_meta import RunError, RunMeta
 
@@ -29,6 +29,7 @@ __all__ = [
     "DraftAction",
     "DraftOutput",
     "EpisodicMemoryHit",
+    "Evidence",
     "IssuePayload",
     "IssueSource",
     "IssueType",
@@ -36,11 +37,12 @@ __all__ = [
     "PlannerClassification",
     "PlannerOutput",
     "ResearchFindings",
-    "ResearchSource",
+    "ResearchSummary",
     "RiskAssessment",
     "RiskLevel",
     "RunError",
     "RunMeta",
     "RunStatus",
     "SandboxResult",
+    "ToolCallRecord",
 ]
