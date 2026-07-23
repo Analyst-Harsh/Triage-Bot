@@ -41,3 +41,9 @@ class RunStatus(StrEnum):
     APPROVED_AND_POSTED = "approved_and_posted"
     REJECTED = "rejected"
     FAILED = "failed"
+
+
+class PostOutcome(StrEnum):
+    POSTED = "posted"
+    FAILED = "failed"
+    QUEUED = "queued"

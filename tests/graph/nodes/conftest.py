@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import create_autospec
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -9,10 +10,13 @@ from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_core.tools import BaseTool
 from pydantic import Field
 
+from graph.nodes.auto_post import AutoPostNode
 from graph.nodes.drafter import DrafterSubgraph
 from graph.nodes.planner import PlannerNode
 from graph.nodes.risk_check import RiskCheckNode
+from graph.nodes.utils.action_executor import ActionExecutor
 from graph.schemas import (
+    ActionPostResult,
     ActionRiskJudgment,
     CommentAction,
     DraftProposal,
@@ -21,6 +25,7 @@ from graph.schemas import (
     IssueSource,
     IssueType,
     PlannerClassification,
+    PostOutcome,
     ProposedAction,
     RiskJudgmentBatch,
     RiskLevel,
@@ -242,3 +247,24 @@ def make_fake_drafter_subgraph(
     tools: list[BaseTool] | None = None, *, sandbox_handle: SandboxHandle | None = None
 ) -> DrafterSubgraph:
     return _FakeDrafterSubgraph(tools, sandbox_handle=sandbox_handle)
+
+
+class _FakeAutoPostNode(AutoPostNode):
+    """Test double: overrides `AutoPostNode.__init__` (inherited, would
+    otherwise construct a real `ActionExecutor`, which itself resolves the
+    real process-wide `get_github_client()` singleton) to accept an
+    `ActionExecutor`-shaped fake directly -- the real `execute()` logic
+    (inherited, not overridden) is what's actually under test."""
+
+    def __init__(self, action_executor: Any) -> None:
+        self._action_executor = action_executor
+
+
+def make_fake_auto_post_node(action_executor: Any = None) -> AutoPostNode:
+    if action_executor is None:
+        action_executor = create_autospec(ActionExecutor, instance=True, spec_set=True)
+        # Default stub result so callers that don't care about ActionExecutor
+        # behavior (e.g. builder-level integration tests) get a real,
+        # schema-valid `ActionPostResult` back rather than a bare `AsyncMock`.
+        action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
+    return _FakeAutoPostNode(action_executor)

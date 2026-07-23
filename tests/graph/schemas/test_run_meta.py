@@ -24,6 +24,12 @@ def test_construction_with_defaults() -> None:
     assert meta.tool_calls_made == 0
     assert meta.estimated_cost_usd == 0.0
     assert meta.errors == []
+    assert meta.dry_run is True
+
+
+def test_dry_run_can_be_disabled() -> None:
+    meta = make_run_meta(dry_run=False)
+    assert meta.dry_run is False
 
 
 def test_errors_list() -> None:

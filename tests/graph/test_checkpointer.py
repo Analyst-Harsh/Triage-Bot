@@ -53,7 +53,11 @@ async def test_state_survives_reopening_the_same_db_file(
         reopened_graph = build_graph(checkpointer=reopened_checkpointer)
         snapshot = await reopened_graph.aget_state(config)  # pyright: ignore[reportUnknownMemberType]
 
-    assert snapshot.values["status"] == RunStatus.AUTO_POSTED
+    # The graph is now strictly linear (risk_check -> auto_post ->
+    # approval_queue -> END, no conditional routing) — approval_queue is
+    # still a no-op stub that unconditionally overwrites status to
+    # PENDING_APPROVAL after auto_post runs (see graph/nodes/approval_queue.py).
+    assert snapshot.values["status"] == RunStatus.PENDING_APPROVAL
     assert snapshot.values["run_meta"].thread_id == state["run_meta"].thread_id
 
 

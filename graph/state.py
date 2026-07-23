@@ -7,6 +7,7 @@ from graph.schemas import (
     EpisodicMemoryHit,
     IssuePayload,
     PlannerOutput,
+    PostResults,
     ResearchFindings,
     RiskAssessment,
     RunMeta,
@@ -20,6 +21,7 @@ class TriageState(TypedDict):
     research_findings: ResearchFindings | None
     draft: DraftOutput | None
     risk_assessment: RiskAssessment | None
+    post_results: PostResults | None
     episodic_context: list[EpisodicMemoryHit]
     status: RunStatus
     run_meta: RunMeta
@@ -37,6 +39,7 @@ class TriageStateUpdate(TypedDict, total=False):
     research_findings: ResearchFindings | None
     draft: DraftOutput | None
     risk_assessment: RiskAssessment | None
+    post_results: PostResults | None
     episodic_context: list[EpisodicMemoryHit]
     status: RunStatus
     run_meta: RunMeta
@@ -47,6 +50,7 @@ def create_initial_state(
     *,
     max_iterations: int,
     max_cost_usd: float,
+    dry_run: bool = True,
 ) -> TriageState:
     thread_id = f"{issue.repo_full_name}#{issue.issue_number}"
     return TriageState(
@@ -55,6 +59,7 @@ def create_initial_state(
         research_findings=None,
         draft=None,
         risk_assessment=None,
+        post_results=None,
         episodic_context=[],
         status=RunStatus.RECEIVED,
         run_meta=RunMeta(
@@ -64,5 +69,6 @@ def create_initial_state(
             started_at=datetime.now(UTC),
             max_iterations=max_iterations,
             max_cost_usd=max_cost_usd,
+            dry_run=dry_run,
         ),
     )

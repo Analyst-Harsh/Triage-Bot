@@ -6,7 +6,7 @@ import structlog
 from langchain_core.runnables import RunnableConfig
 from pydantic import TypeAdapter
 
-from api.github_client import build_github_client, fetch_issue
+from api.github_client import get_github_client
 from config.settings import get_settings
 from graph.builder import build_graph
 from graph.checkpointer import sqlite_checkpointer
@@ -40,8 +40,8 @@ def write_result_file(result: TriageState) -> Path:
 
 async def main() -> None:
     configure_logging()
-    github_client = build_github_client()
-    issue = fetch_issue(github_client, REPO_FULL_NAME, ISSUE_NUMBER)
+    github_client = get_github_client()
+    issue = github_client.fetch_issue(REPO_FULL_NAME, ISSUE_NUMBER)
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
     config: RunnableConfig = {"configurable": {"thread_id": state["run_meta"].thread_id}}
     log.info(
@@ -54,10 +54,10 @@ async def main() -> None:
     async with (
         sqlite_checkpointer() as checkpointer,
         researcher_toolset(get_settings()) as tools,
-        # Reuses `client` (the same `Github` instance `fetch_issue` used
-        # above), not a second one — opened fresh for this one run, exactly
-        # like `researcher_toolset` above.
-        sandbox_toolset(get_settings(), github_client, issue.repo_full_name) as (
+        # Reuses `github_client.raw` (the same underlying `Github` instance
+        # `fetch_issue` used above), not a second one — opened fresh for this
+        # one run, exactly like `researcher_toolset` above.
+        sandbox_toolset(get_settings(), github_client.raw, issue.repo_full_name) as (
             sandbox_tools,
             sandbox_handle,
         ),
