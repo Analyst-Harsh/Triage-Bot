@@ -11,7 +11,9 @@ from pydantic import Field
 
 from graph.nodes.drafter import DrafterSubgraph
 from graph.nodes.planner import PlannerNode
+from graph.nodes.risk_check import RiskCheckNode
 from graph.schemas import (
+    ActionRiskJudgment,
     CommentAction,
     DraftProposal,
     GroundingCritique,
@@ -20,6 +22,8 @@ from graph.schemas import (
     IssueType,
     PlannerClassification,
     ProposedAction,
+    RiskJudgmentBatch,
+    RiskLevel,
 )
 from graph.state import TriageState, create_initial_state
 from tools.sandbox import SandboxHandle
@@ -162,6 +166,39 @@ def make_fake_planner_node(*, parsed_result: PlannerClassification | None = None
     primary = make_fake_chat_model(model_name="gpt-4o-mini", parsed_result=parsed_result)
     fallback = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
     return _FakePlannerNode(primary_model=primary, fallback_model=fallback)
+
+
+class _FakeRiskCheckNode(RiskCheckNode):
+    """Test double: overrides `RiskCheckNode.__init__` (inherited from
+    `LLMNode`) to accept chat models directly instead of building them from
+    `Settings` — the real `execute()` logic (inherited, not overridden) is
+    what's actually under test. Default parsed result judges a single
+    comment action (index 0) as low-risk, matching `_FakeDrafterSubgraph`'s
+    single-`CommentAction` draft output, so the two fakes compose cleanly in
+    `test_builder.py` without a real LLM call happening for either node."""
+
+    def __init__(
+        self, primary_model: FakeStructuredChatModel, fallback_model: FakeStructuredChatModel
+    ) -> None:
+        self._primary_model = primary_model
+        self._fallback_model = fallback_model
+
+
+def make_fake_risk_check_node(*, parsed_result: RiskJudgmentBatch | None = None) -> RiskCheckNode:
+    if parsed_result is None:
+        parsed_result = RiskJudgmentBatch(
+            judgments=[
+                ActionRiskJudgment(
+                    action_index=0,
+                    level=RiskLevel.LOW,
+                    risk_factors=[],
+                    reasoning="Test double judgment.",
+                )
+            ]
+        )
+    primary = make_fake_chat_model(model_name="gpt-4o-mini", parsed_result=parsed_result)
+    fallback = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
+    return _FakeRiskCheckNode(primary_model=primary, fallback_model=fallback)
 
 
 class _FakeDrafterSubgraph(DrafterSubgraph):

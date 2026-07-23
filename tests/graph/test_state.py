@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from graph.schemas import (
+    ActionRiskAssessment,
     ActionType,
     CodeFixAction,
     DraftedAction,
@@ -95,11 +96,13 @@ def make_fully_populated_state() -> TriageState:
         drafted_at=datetime.now(UTC),
     )
     state["risk_assessment"] = RiskAssessment(
-        level=RiskLevel.MEDIUM,
-        score=45.0,
-        risk_factors=["proposes code change"],
-        reasoning="Small, well-tested fix to a single file.",
-        requires_human_approval=True,
+        action_assessments=[
+            ActionRiskAssessment(
+                level=RiskLevel.MEDIUM,
+                risk_factors=["proposes code change"],
+                reasoning="Small, well-tested fix to a single file.",
+            )
+        ],
         assessed_at=datetime.now(UTC),
     )
     state["episodic_context"] = [

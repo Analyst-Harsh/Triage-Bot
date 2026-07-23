@@ -310,7 +310,7 @@ def test_resolve_code_fix_intent_builds_code_fix_action_from_passing_attempt() -
     assert drafted.action.base_ref == "main"
     assert drafted.rationale == item.rationale
     # A passing fix's `CodeFixAction` produces no public-facing text anyway
-    # (see `_public_facing_text`), but is marked eligible for
+    # (see `public_facing_text`), but is marked eligible for
     # correctness/symmetry -- its `sandbox_result` is a genuine
     # system-derived fact, not an unverifiable claim.
     assert eligible_for_grounding is True
