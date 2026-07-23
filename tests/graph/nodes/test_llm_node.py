@@ -97,8 +97,11 @@ async def test_call_structured_falls_back_on_primary_parsing_failure() -> None:
 
 
 async def test_call_structured_sums_cost_across_primary_and_fallback() -> None:
-    """A primary attempt that burns tokens before failing to parse must
-    still be counted — its tokens were real spend, not free retries."""
+    """Every attempt that burns tokens before failing to parse must still be
+    counted — its tokens were real spend, not free retries. `fail_parse=True`
+    fails unconditionally, so primary exhausts both of its in-place repair
+    attempts (call_structured's `_STRUCTURED_OUTPUT_MAX_ATTEMPTS`) before
+    falling back, contributing 2x its per-attempt tokens/cost."""
     primary = make_fake_chat_model(
         model_name="gpt-4o-mini", input_tokens=1000, output_tokens=1000, fail_parse=True
     )
@@ -113,7 +116,7 @@ async def test_call_structured_sums_cost_across_primary_and_fallback() -> None:
     result = await node.call_structured([], _Answer)
 
     assert result.models_invoked == ["gpt-4o-mini", "claude-haiku-4-5-20251001"]
-    assert result.total_input_tokens == 2000
-    assert result.total_output_tokens == 2000
-    # gpt-4o-mini (0.00015 + 0.0006) + claude-haiku-4-5 (0.001 + 0.005)
-    assert result.estimated_cost_usd == pytest.approx(0.00675)
+    assert result.total_input_tokens == 3000
+    assert result.total_output_tokens == 3000
+    # 2x gpt-4o-mini (0.00015 + 0.0006) + 1x claude-haiku-4-5 (0.001 + 0.005)
+    assert result.estimated_cost_usd == pytest.approx(0.0075)

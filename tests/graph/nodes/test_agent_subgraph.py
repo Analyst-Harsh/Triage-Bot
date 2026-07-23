@@ -1,6 +1,12 @@
 from typing import ClassVar
 
 import structlog
+from langchain.agents.middleware import (
+    ClearToolUsesEdit,
+    ContextEditingMiddleware,
+    ModelFallbackMiddleware,
+    ToolCallLimitMiddleware,
+)
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
 from structlog.testing import capture_logs
@@ -223,3 +229,99 @@ async def test_assemble_node_records_previously_dangling_tool_call(
     assert len(tool_calls) == 1
     assert tool_calls[0].tool_name == "search_code"
     assert tool_calls[0].status == "error"
+
+
+# ---------------------------------------------------------------------------
+# Context-editing middleware (token bloat mitigation)
+# ---------------------------------------------------------------------------
+
+
+def test_middleware_order_is_context_editing_then_tool_call_limit_then_fallback() -> None:
+    node = make_node()
+
+    middleware = node._middleware()  # pyright: ignore[reportPrivateUsage]
+
+    assert isinstance(middleware[0], ContextEditingMiddleware)
+    assert isinstance(middleware[1], ToolCallLimitMiddleware)
+    assert isinstance(middleware[2], ModelFallbackMiddleware)
+
+
+def test_middleware_context_editing_uses_expected_constants() -> None:
+    node = make_node()
+
+    middleware = node._middleware()  # pyright: ignore[reportPrivateUsage]
+
+    context_editing = middleware[0]
+    assert isinstance(context_editing, ContextEditingMiddleware)
+    edit = context_editing.edits[0]
+    assert isinstance(edit, ClearToolUsesEdit)
+    assert edit.trigger == node.context_edit_trigger_tokens
+    assert edit.keep == node.context_edit_keep_tool_results
+    assert edit.placeholder == node.context_edit_placeholder
+
+
+def test_middleware_context_editing_respects_subclass_override() -> None:
+    """Proves the constants are read from `self`, not hardcoded twice."""
+
+    class _OverriddenStubAgentSubgraph(_StubAgentSubgraph):
+        context_edit_trigger_tokens: ClassVar[int] = 5
+        context_edit_keep_tool_results: ClassVar[int] = 1
+        context_edit_placeholder: ClassVar[str] = "[custom placeholder]"
+
+    primary = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
+    fallback = make_fake_chat_model(model_name="gpt-4o-mini")
+    node = _OverriddenStubAgentSubgraph(primary, fallback)
+
+    context_editing = node._middleware()[0]  # pyright: ignore[reportPrivateUsage]
+    assert isinstance(context_editing, ContextEditingMiddleware)
+    edit = context_editing.edits[0]
+    assert isinstance(edit, ClearToolUsesEdit)
+    assert edit.trigger == 5
+    assert edit.keep == 1
+    assert edit.placeholder == "[custom placeholder]"
+
+
+async def test_summarize_node_sends_clamped_messages_to_model(triage_state: TriageState) -> None:
+    """`summarize_node` sits outside `build_agent()`'s create_agent loop, so
+    `ContextEditingMiddleware` never runs over it -- this exercises the
+    separate clamping pass it applies itself (`clamp_trajectory_for_model_call`),
+    proving old tool results are cleared before the structured-output call,
+    the most recent `keep` are preserved, and the checkpointed `state["messages"]`
+    is never mutated in the process."""
+
+    class _LowTriggerStubAgentSubgraph(_StubAgentSubgraph):
+        context_edit_trigger_tokens: ClassVar[int] = 10
+        context_edit_keep_tool_results: ClassVar[int] = 2
+        context_edit_placeholder: ClassVar[str] = "[cleared]"
+
+    primary = make_fake_chat_model(
+        model_name="claude-haiku-4-5-20251001", parsed_result=_StubSummary(note="found it")
+    )
+    fallback = make_fake_chat_model(model_name="gpt-4o-mini")
+    node = _LowTriggerStubAgentSubgraph(primary, fallback)
+
+    messages: list[BaseMessage] = []
+    original_contents: list[str] = []
+    for i in range(5):
+        content = f"result-{i}-" + ("x" * 200)
+        original_contents.append(content)
+        messages.append(
+            AIMessage(content="", tool_calls=[{"name": "read_file", "args": {}, "id": f"call_{i}"}])
+        )
+        messages.append(ToolMessage(content=content, tool_call_id=f"call_{i}", status="success"))
+    state = make_loop_state(triage_state, messages=messages)
+
+    await node.summarize_node(state)
+
+    assert len(primary.received_messages) == 1
+    sent = primary.received_messages[0]
+    sent_tool_messages = [msg for msg in sent if isinstance(msg, ToolMessage)]
+    assert len(sent_tool_messages) == 5
+    # Oldest 3 (keep=2 preserves only the most recent 2) are cleared.
+    assert [msg.content for msg in sent_tool_messages[:3]] == ["[cleared]"] * 3
+    # Most recent 2 keep their original content.
+    assert [msg.content for msg in sent_tool_messages[3:]] == original_contents[3:]
+
+    # The checkpointed trajectory itself was never mutated.
+    original_tool_messages = [msg for msg in state["messages"] if isinstance(msg, ToolMessage)]
+    assert [msg.content for msg in original_tool_messages] == original_contents

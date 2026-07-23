@@ -1,10 +1,11 @@
 from graph.schemas.actions import (
     CloseAction,
     CodeFixAction,
+    CodeFixIntent,
     CommentAction,
     DraftAction,
+    DraftIntent,
     LabelAction,
-    NonCodeDraftAction,
     SandboxResult,
 )
 from graph.schemas.draft import DraftedAction, DraftOutput, DraftProposal, ProposedAction
@@ -22,13 +23,16 @@ from graph.schemas.planner import PlannerClassification, PlannerOutput
 from graph.schemas.research import Evidence, ResearchFindings, ResearchSummary, ToolCallRecord
 from graph.schemas.risk import RiskAssessment
 from graph.schemas.run_meta import RunError, RunMeta
+from graph.schemas.sandbox import SandboxAttempt
 
 __all__ = [
     "ActionType",
     "CloseAction",
     "CodeFixAction",
+    "CodeFixIntent",
     "CommentAction",
     "DraftAction",
+    "DraftIntent",
     "DraftOutput",
     "DraftProposal",
     "DraftedAction",
@@ -39,7 +43,6 @@ __all__ = [
     "IssueSource",
     "IssueType",
     "LabelAction",
-    "NonCodeDraftAction",
     "PlannerClassification",
     "PlannerOutput",
     "ProposedAction",
@@ -50,6 +53,7 @@ __all__ = [
     "RunError",
     "RunMeta",
     "RunStatus",
+    "SandboxAttempt",
     "SandboxResult",
     "ToolCallRecord",
 ]

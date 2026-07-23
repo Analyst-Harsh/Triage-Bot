@@ -30,8 +30,8 @@ class ResearcherSubgraph(AgentSubgraph[ResearchSummary]):
 
     name: ClassVar[NodeName] = NodeName.RESEARCHER
     llm_config: ClassVar[NodeLLMConfig] = NodeLLMConfig(
-        primary=LLMEndpointConfig(provider="anthropic", model="claude-sonnet-5"),
-        fallback=LLMEndpointConfig(provider="openai", model="gpt-4o"),
+        primary=LLMEndpointConfig(provider="openai", model="gpt-5.4-nano"),
+        fallback=LLMEndpointConfig(provider="openai", model="gpt-5-nano"),
     )
     max_tool_calls: ClassVar[int] = RESEARCHER_MAX_TOOL_CALLS
     # Typed as the base's `type[BaseModel]`, not `type[ResearchSummary]`:

@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SandboxResult(BaseModel):
@@ -32,6 +32,25 @@ class CodeFixAction(BaseModel):
     diff: str
     target_files: list[str]
     sandbox_result: SandboxResult
+    base_commit_sha: str  # real GitHub SHA the tarball was fetched at
+    base_ref: str  # the branch/SHA originally requested
+
+
+class CodeFixIntent(BaseModel):
+    """Signals intent to attempt a code fix. Carries no diff, target_files,
+    or sandbox_result fields — those are always filled in from the
+    sandbox's own recorded result, never by you. Do not try to supply them."""
+
+    # extra="forbid" closes the gap where Pydantic would otherwise silently
+    # drop unknown fields: a model emitting a full CodeFixAction-shaped
+    # payload (diff/target_files/sandbox_result/...) alongside
+    # action_type="code_fix" would validate successfully with those fields
+    # quietly discarded, rather than being rejected outright. finalize()
+    # builds the real CodeFixAction from the sandbox's own recorded
+    # SandboxAttempts, never from anything the model supplies here.
+    model_config = ConfigDict(extra="forbid")
+
+    action_type: Literal["code_fix"] = "code_fix"
 
 
 DraftAction = Annotated[
@@ -39,11 +58,8 @@ DraftAction = Annotated[
     Field(discriminator="action_type"),
 ]
 
-NonCodeDraftAction = Annotated[
-    CommentAction | LabelAction | CloseAction,
+DraftIntent = Annotated[
+    CommentAction | LabelAction | CloseAction | CodeFixIntent,
     Field(discriminator="action_type"),
 ]
-"""Restricted to the actions the Drafter can propose before a code-fix sandbox
-exists — the LLM-facing schema for drafting is typed against this, not the
-full `DraftAction`, so it cannot type its way into emitting `code_fix` without
-a real `SandboxResult` behind it."""
+"""Everything the Drafter LLM may propose. Replaces NonCodeDraftAction."""

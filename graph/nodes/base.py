@@ -57,9 +57,7 @@ class TriageNode(ABC):
             log.info("node_finished", node=self.name, duration_ms=duration_ms)
 
         base_run_meta = update.get("run_meta", state["run_meta"])
-        update["run_meta"] = base_run_meta.model_copy(
-            update={"iteration_count": base_run_meta.iteration_count + 1}
-        )
+        update["run_meta"] = base_run_meta.with_usage(iterations=1)
         return update
 
     @abstractmethod

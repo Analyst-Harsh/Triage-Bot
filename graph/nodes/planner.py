@@ -18,8 +18,8 @@ class PlannerNode(LLMNode):
 
     name: ClassVar[NodeName] = NodeName.PLANNER
     llm_config: ClassVar[NodeLLMConfig] = NodeLLMConfig(
-        primary=LLMEndpointConfig(provider="openai", model="gpt-4o-mini"),
-        fallback=LLMEndpointConfig(provider="anthropic", model="claude-haiku-4-5-20251001"),
+        primary=LLMEndpointConfig(provider="openai", model="gpt-5.4-nano", temperature=0.0),
+        fallback=LLMEndpointConfig(provider="openai", model="gpt-5-nano", temperature=0.0),
     )
 
     async def execute(self, state: TriageState) -> TriageStateUpdate:
@@ -28,9 +28,6 @@ class PlannerNode(LLMNode):
         )
         result = await self.call_structured(messages, PlannerClassification)
         output = PlannerOutput(**result.parsed.model_dump(), classified_at=datetime.now(UTC))
-
-        run_meta = state["run_meta"]
-        new_cost = run_meta.estimated_cost_usd + result.estimated_cost_usd
 
         log.info(
             "planner_classified",
@@ -45,5 +42,5 @@ class PlannerNode(LLMNode):
         return TriageStateUpdate(
             planner_output=output,
             status=RunStatus.PLANNING,
-            run_meta=run_meta.model_copy(update={"estimated_cost_usd": new_cost}),
+            run_meta=state["run_meta"].with_usage(cost_usd=result.estimated_cost_usd),
         )

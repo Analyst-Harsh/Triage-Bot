@@ -1,15 +1,21 @@
 from datetime import UTC, datetime
 
 import pytest
+from github import Github
+from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import NodeError
+from pydantic import SecretStr
 from structlog.testing import capture_logs
 
 import graph.builder as builder_module
+from config.settings import Settings
 from graph.builder import build_graph, handle_node_error
+from graph.nodes.drafter import DrafterSubgraph
 from graph.schemas import IssuePayload, IssueSource, RunStatus
 from graph.state import create_initial_state
 from tests.graph.nodes.conftest import make_fake_drafter_subgraph, make_fake_planner_node
+from tools.sandbox import SandboxHandle
 
 
 def make_issue() -> IssuePayload:
@@ -79,6 +85,47 @@ def test_build_graph_threads_checkpointer_through_compile(
 
     # Same library generics gap as the ignores elsewhere in this file/builder.py.
     assert graph.checkpointer is checkpointer  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_build_graph_threads_sandbox_handle_into_drafter_subgraph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(builder_module, "PlannerNode", make_fake_planner_node)
+    # Spy that wraps the existing `_FakeDrafterSubgraph` test double (so no
+    # real LLM call happens if the graph were ever invoked) while capturing
+    # the constructed instance itself -- `build_graph()` doesn't return the
+    # `DrafterSubgraph` it builds, so this is the only way to inspect what
+    # it was constructed with, mirroring the `monkeypatch.setattr(...,
+    # "PlannerNode"/"DrafterSubgraph", ...)` pattern already used elsewhere
+    # in this file.
+    constructed: list[DrafterSubgraph] = []
+
+    def spy_drafter_subgraph(
+        tools: list[BaseTool] | None = None, *, sandbox_handle: SandboxHandle | None = None
+    ) -> DrafterSubgraph:
+        subgraph = make_fake_drafter_subgraph(tools, sandbox_handle=sandbox_handle)
+        constructed.append(subgraph)
+        return subgraph
+
+    monkeypatch.setattr(builder_module, "DrafterSubgraph", spy_drafter_subgraph)
+    # A real `SandboxHandle` with dummy settings/client -- safe here since
+    # `build_graph()` only threads it through construction, never calls
+    # `ensure_ready()` or any other method that would touch E2B/GitHub.
+    handle = SandboxHandle(
+        settings=Settings(e2b_api_key=SecretStr("test-e2b-key")),
+        github_client=Github(),
+        repo_full_name="octo/repo",
+        ref=None,
+    )
+
+    build_graph(drafter_sandbox_handle=handle)
+
+    assert len(constructed) == 1
+    # Inspecting the private attribute directly is the established pattern
+    # for this kind of construction-threading check (see `_FakeDrafterSubgraph`
+    # in tests/graph/nodes/conftest.py, which stores it the same way, and the
+    # `reportPrivateUsage` ignore precedent in tests/graph/nodes/test_drafter.py).
+    assert constructed[0]._sandbox_handle is handle  # pyright: ignore[reportPrivateUsage]
 
 
 def test_handle_node_error_records_run_error_and_fails_run() -> None:

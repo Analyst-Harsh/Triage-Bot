@@ -13,9 +13,10 @@ from graph.checkpointer import sqlite_checkpointer
 from graph.state import TriageState, create_initial_state
 from observability.logging_config import configure_logging
 from tools.mcp_clients import researcher_toolset
+from tools.sandbox import sandbox_toolset
 
-REPO_FULL_NAME = "octocat/Spoon-Knife"
-ISSUE_NUMBER = 40391
+REPO_FULL_NAME = "arrow-py/arrow"
+ISSUE_NUMBER = 1278
 RESULTS_DIR = Path("results")
 
 log = structlog.get_logger(__name__)
@@ -39,8 +40,8 @@ def write_result_file(result: TriageState) -> Path:
 
 async def main() -> None:
     configure_logging()
-    client = build_github_client()
-    issue = fetch_issue(client, REPO_FULL_NAME, ISSUE_NUMBER)
+    github_client = build_github_client()
+    issue = fetch_issue(github_client, REPO_FULL_NAME, ISSUE_NUMBER)
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
     config: RunnableConfig = {"configurable": {"thread_id": state["run_meta"].thread_id}}
     log.info(
@@ -53,8 +54,20 @@ async def main() -> None:
     async with (
         sqlite_checkpointer() as checkpointer,
         researcher_toolset(get_settings()) as tools,
+        # Reuses `client` (the same `Github` instance `fetch_issue` used
+        # above), not a second one — opened fresh for this one run, exactly
+        # like `researcher_toolset` above.
+        sandbox_toolset(get_settings(), github_client, issue.repo_full_name) as (
+            sandbox_tools,
+            sandbox_handle,
+        ),
     ):
-        graph = build_graph(checkpointer=checkpointer, researcher_tools=tools)
+        graph = build_graph(
+            checkpointer=checkpointer,
+            researcher_tools=tools,
+            drafter_tools=sandbox_tools,
+            drafter_sandbox_handle=sandbox_handle,
+        )
         # langgraph's ainvoke() overloads resolve to a partially-Unknown type
         # under strict pyright — a library generics gap, same as the
         # `.invoke()` ignore in tests/graph/test_builder.py. The runtime

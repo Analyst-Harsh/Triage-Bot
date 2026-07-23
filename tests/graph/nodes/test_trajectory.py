@@ -1,6 +1,7 @@
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from graph.nodes.trajectory import (
+    clamp_trajectory_for_model_call,
     derive_tool_call_records,
     estimate_trajectory_cost,
     missing_tool_results,
@@ -204,3 +205,63 @@ def test_estimate_trajectory_cost_unmapped_model_contributes_zero() -> None:
     cost = estimate_trajectory_cost(messages)
 
     assert cost == 0.0
+
+
+def make_tool_call_pair(index: int, content: str) -> list[AIMessage | ToolMessage]:
+    return [
+        make_ai_tool_call("read_file", {"path": f"f{index}.py"}, f"call_{index}"),
+        ToolMessage(content=content, tool_call_id=f"call_{index}", status="success"),
+    ]
+
+
+def test_clamp_trajectory_for_model_call_noop_under_trigger() -> None:
+    messages = [
+        *make_tool_call_pair(0, "short result"),
+        *make_tool_call_pair(1, "another short result"),
+    ]
+
+    clamped = clamp_trajectory_for_model_call(
+        messages, trigger=1_000_000, keep=1, placeholder="[cleared]"
+    )
+
+    assert [m.content for m in clamped] == [m.content for m in messages]
+
+
+def test_clamp_trajectory_for_model_call_clears_oldest_beyond_keep() -> None:
+    contents = [f"result-{i}-" + ("x" * 200) for i in range(5)]
+    messages: list[AIMessage | ToolMessage] = []
+    for i, content in enumerate(contents):
+        messages.extend(make_tool_call_pair(i, content))
+
+    clamped = clamp_trajectory_for_model_call(messages, trigger=10, keep=2, placeholder="[cleared]")
+
+    assert len(clamped) == len(messages)  # replaced in place, never removed
+    clamped_tool_messages = [m for m in clamped if isinstance(m, ToolMessage)]
+    assert [m.content for m in clamped_tool_messages[:3]] == ["[cleared]"] * 3
+    assert [m.content for m in clamped_tool_messages[3:]] == contents[3:]
+
+
+def test_clamp_trajectory_for_model_call_does_not_mutate_input() -> None:
+    contents = [f"result-{i}-" + ("x" * 200) for i in range(5)]
+    messages: list[AIMessage | ToolMessage] = []
+    for i, content in enumerate(contents):
+        messages.extend(make_tool_call_pair(i, content))
+
+    clamp_trajectory_for_model_call(messages, trigger=10, keep=2, placeholder="[cleared]")
+
+    original_tool_messages = [m for m in messages if isinstance(m, ToolMessage)]
+    assert [m.content for m in original_tool_messages] == contents
+
+
+def test_clamp_trajectory_for_model_call_skips_tool_messages_with_no_matching_ai_message() -> None:
+    """A dangling `ToolMessage` with no preceding `AIMessage` owning its
+    `tool_call_id` (the shape `missing_tool_results` can produce before
+    `resolve_dangling_tool_calls` splices it back next to its real owner)
+    is left untouched rather than raising."""
+    orphan_content = "orphaned result " + ("z" * 200)
+    messages = [ToolMessage(content=orphan_content, tool_call_id="orphan_call", status="error")]
+
+    clamped = clamp_trajectory_for_model_call(messages, trigger=1, keep=0, placeholder="[cleared]")
+
+    assert len(clamped) == 1
+    assert clamped[0].content == orphan_content

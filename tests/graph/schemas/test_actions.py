@@ -4,15 +4,16 @@ from pydantic import TypeAdapter, ValidationError
 from graph.schemas import (
     CloseAction,
     CodeFixAction,
+    CodeFixIntent,
     CommentAction,
     DraftAction,
+    DraftIntent,
     LabelAction,
-    NonCodeDraftAction,
     SandboxResult,
 )
 
 draft_action_adapter: TypeAdapter[DraftAction] = TypeAdapter(DraftAction)
-non_code_draft_action_adapter: TypeAdapter[NonCodeDraftAction] = TypeAdapter(NonCodeDraftAction)
+draft_intent_adapter: TypeAdapter[DraftIntent] = TypeAdapter(DraftIntent)
 
 
 def test_comment_action_round_trip() -> None:
@@ -44,10 +45,14 @@ def test_code_fix_action_round_trip() -> None:
             test_command="pytest tests/test_foo.py",
             duration_seconds=1.23,
         ),
+        base_commit_sha="a1b2c3d4e5f6",
+        base_ref="main",
     )
     restored = draft_action_adapter.validate_python(action.model_dump())
     assert isinstance(restored, CodeFixAction)
     assert restored.sandbox_result.passed is True
+    assert restored.base_commit_sha == "a1b2c3d4e5f6"
+    assert restored.base_ref == "main"
 
 
 def test_discriminated_union_dispatches_by_action_type() -> None:
@@ -68,26 +73,44 @@ def test_unknown_action_type_is_rejected() -> None:
         draft_action_adapter.validate_python(payload)
 
 
-def test_non_code_comment_action_round_trip() -> None:
+def test_code_fix_intent_round_trip() -> None:
+    intent = CodeFixIntent()
+    restored = CodeFixIntent.model_validate_json(intent.model_dump_json())
+    assert restored == intent
+    assert restored.action_type == "code_fix"
+
+
+def test_draft_intent_dispatches_comment() -> None:
     action = CommentAction(comment_body="Thanks for the report!")
-    restored = non_code_draft_action_adapter.validate_python(action.model_dump())
+    restored = draft_intent_adapter.validate_python(action.model_dump())
     assert isinstance(restored, CommentAction)
     assert restored == action
 
 
-def test_non_code_label_action_round_trip() -> None:
+def test_draft_intent_dispatches_label() -> None:
     action = LabelAction(labels_to_add=["needs-triage"], labels_to_remove=["stale"])
-    restored = non_code_draft_action_adapter.validate_python(action.model_dump())
+    restored = draft_intent_adapter.validate_python(action.model_dump())
     assert isinstance(restored, LabelAction)
 
 
-def test_non_code_close_action_round_trip() -> None:
+def test_draft_intent_dispatches_close() -> None:
     action = CloseAction(reason="duplicate", close_comment="Duplicate of #10")
-    restored = non_code_draft_action_adapter.validate_python(action.model_dump())
+    restored = draft_intent_adapter.validate_python(action.model_dump())
     assert isinstance(restored, CloseAction)
 
 
-def test_non_code_draft_action_rejects_code_fix() -> None:
+def test_draft_intent_dispatches_code_fix_intent() -> None:
+    intent = CodeFixIntent()
+    restored = draft_intent_adapter.validate_python(intent.model_dump())
+    assert isinstance(restored, CodeFixIntent)
+
+
+def test_draft_intent_rejects_full_code_fix_action_payload() -> None:
+    """The core security invariant: the LLM-facing `DraftIntent` union's
+    `code_fix` variant is `CodeFixIntent` (intent only), not `CodeFixAction`.
+    A payload shaped like a real `CodeFixAction` — with a `diff`/
+    `target_files`/`sandbox_result`/`base_commit_sha`/`base_ref` the model
+    fabricated — must be rejected, not silently accepted as extra fields."""
     payload = {
         "action_type": "code_fix",
         "diff": "--- a/foo.py\n+++ b/foo.py\n",
@@ -98,6 +121,8 @@ def test_non_code_draft_action_rejects_code_fix() -> None:
             "test_command": "pytest tests/test_foo.py",
             "duration_seconds": 1.23,
         },
+        "base_commit_sha": "a1b2c3d4e5f6",
+        "base_ref": "main",
     }
     with pytest.raises(ValidationError):
-        non_code_draft_action_adapter.validate_python(payload)
+        draft_intent_adapter.validate_python(payload)
