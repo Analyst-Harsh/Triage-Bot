@@ -21,11 +21,18 @@ from graph.schemas.issue import IssuePayload
 from graph.schemas.memory import EpisodicMemoryHit
 from graph.schemas.planner import PlannerClassification, PlannerOutput
 from graph.schemas.research import Evidence, ResearchFindings, ResearchSummary, ToolCallRecord
-from graph.schemas.risk import RiskAssessment
+from graph.schemas.risk import (
+    ActionRiskAssessment,
+    ActionRiskJudgment,
+    RiskAssessment,
+    RiskJudgmentBatch,
+)
 from graph.schemas.run_meta import RunError, RunMeta
 from graph.schemas.sandbox import SandboxAttempt
 
 __all__ = [
+    "ActionRiskAssessment",
+    "ActionRiskJudgment",
     "ActionType",
     "CloseAction",
     "CodeFixAction",
@@ -49,6 +56,7 @@ __all__ = [
     "ResearchFindings",
     "ResearchSummary",
     "RiskAssessment",
+    "RiskJudgmentBatch",
     "RiskLevel",
     "RunError",
     "RunMeta",

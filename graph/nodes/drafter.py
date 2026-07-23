@@ -279,7 +279,7 @@ class DrafterSubgraph(AgentSubgraph[DraftProposal]):
                 ),
                 rationale=item.rationale,
             ),
-            # `_public_facing_text` returns `None` for `code_fix` actions
+            # `public_facing_text` returns `None` for `code_fix` actions
             # regardless (a passing diff is never posted verbatim as
             # GitHub-comment prose), so this eligibility bit is inert today
             # -- marked `True` for correctness/symmetry, since a passing

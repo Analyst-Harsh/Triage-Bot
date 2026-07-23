@@ -14,7 +14,11 @@ from graph.builder import build_graph, handle_node_error
 from graph.nodes.drafter import DrafterSubgraph
 from graph.schemas import IssuePayload, IssueSource, RunStatus
 from graph.state import create_initial_state
-from tests.graph.nodes.conftest import make_fake_drafter_subgraph, make_fake_planner_node
+from tests.graph.nodes.conftest import (
+    make_fake_drafter_subgraph,
+    make_fake_planner_node,
+    make_fake_risk_check_node,
+)
 from tools.sandbox import SandboxHandle
 
 
@@ -54,6 +58,11 @@ async def test_invoke_flows_through_all_nodes_to_auto_post(
     # the Researcher's empty-investigation-plan skip) -- without this fake it
     # would make a real LLM call during this test.
     monkeypatch.setattr(builder_module, "DrafterSubgraph", make_fake_drafter_subgraph)
+    # The fake Drafter's output includes a CommentAction, which RiskCheckNode
+    # now sends through a real LLM judgment call (labels/code fixes are
+    # hardcoded, but comments/closes aren't) -- without this fake, this test
+    # would make a real LLM call too.
+    monkeypatch.setattr(builder_module, "RiskCheckNode", make_fake_risk_check_node)
     graph = build_graph()
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)

@@ -345,12 +345,13 @@ def build_drafting_message(
     )
 
 
-def _public_facing_text(action: DraftAction) -> str | None:
+def public_facing_text(action: DraftAction) -> str | None:
     """The text that would actually be posted to GitHub for this action, if
     any. Deliberately excludes `rationale`/`overall_rationale` (internal
     reasoning for the risk check/human reviewer, never posted, and
     inherently a judgment call rather than a factual claim) — this is the
-    only text the grounding self-check should be run against."""
+    only text the grounding self-check (and the risk check's own LLM
+    judgment, `prompts.risk_check`) should ever be run against."""
     match action.action_type:
         case "comment":
             return action.comment_body
@@ -369,7 +370,7 @@ def format_public_draft_text(actions: list[DraftedAction]) -> str | None:
     draft) — the signal that there is nothing for the grounding self-check
     to fact-check, since rationale/overall_rationale are never posted and
     are judgment calls, not factual claims to verify against evidence."""
-    texts = [text for drafted in actions if (text := _public_facing_text(drafted.action))]
+    texts = [text for drafted in actions if (text := public_facing_text(drafted.action))]
     if not texts:
         return None
     return "\n\n".join(texts)
