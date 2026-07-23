@@ -208,6 +208,10 @@ def _clamp_log_excerpt(logs: str) -> str:
     return logs
 
 
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
 def _format_no_fix_attempted_comment(
     attempts: list[SandboxAttempt], *, install_attempted: bool
 ) -> str:
@@ -234,26 +238,26 @@ def _format_no_fix_attempted_comment(
 
     if baseline_attempts and not any(attempt.result.passed for attempt in baseline_attempts):
         last_baseline = baseline_attempts[-1]
-        word = "check" if len(baseline_attempts) == 1 else "checks"
+        baseline_summary = _plural(len(baseline_attempts), "baseline check")
         logs_excerpt = _clamp_log_excerpt(last_baseline.result.logs)
         if not install_attempted:
             return (
                 "A code fix could not be verified for this issue: dependencies were "
                 "never installed in the sandbox before the test suite was run "
-                f"({len(baseline_attempts)} baseline {word} against "
-                f"`{last_baseline.result.test_command}`, all failing). This looks "
-                "like a sandbox setup issue rather than a genuine pre-existing "
-                "problem with the repository -- flagging for manual review rather "
-                "than concluding the repo's own tests are broken.\n\n"
+                f"({baseline_summary} against `{last_baseline.result.test_command}`, "
+                "all failing). This looks like a sandbox setup issue rather than a "
+                "genuine pre-existing problem with the repository -- flagging for "
+                "manual review rather than concluding the repo's own tests are "
+                "broken.\n\n"
                 f"Baseline test output:\n```\n{logs_excerpt}\n```"
             )
         return (
             "This repository's existing test suite is already failing before any "
-            f"change was made for this issue ({len(baseline_attempts)} baseline "
-            f"{word} against `{last_baseline.result.test_command}`, all failing, "
-            "even after installing dependencies). This is unrelated to the current "
-            "issue — the existing tests need to be fixed first before a code fix "
-            "here can be verified. Flagging for manual review.\n\n"
+            f"change was made for this issue ({baseline_summary} against "
+            f"`{last_baseline.result.test_command}`, all failing, even after "
+            "installing dependencies). This is unrelated to the current issue — "
+            "the existing tests need to be fixed first before a code fix here can "
+            "be verified. Flagging for manual review.\n\n"
             f"Baseline test output:\n```\n{logs_excerpt}\n```"
         )
 
@@ -262,11 +266,9 @@ def _format_no_fix_attempted_comment(
         status = (
             "passing" if any(attempt.result.passed for attempt in baseline_attempts) else "failing"
         )
-        word = "check" if len(baseline_attempts) == 1 else "checks"
-        checks.append(f"{len(baseline_attempts)} baseline {word} ({status})")
+        checks.append(f"{_plural(len(baseline_attempts), 'baseline check')} ({status})")
     if repro_attempts:
-        word = "check" if len(repro_attempts) == 1 else "checks"
-        checks.append(f"{len(repro_attempts)} repro {word}")
+        checks.append(_plural(len(repro_attempts), "repro check"))
     checks_summary = "; ".join(checks) if checks else "no test checks were run"
 
     return (
@@ -313,11 +315,10 @@ def format_failed_fix_comment(attempts: list[SandboxAttempt], *, install_attempt
     )
     logs_excerpt = _clamp_log_excerpt(last_fix_attempt.result.logs)
 
-    fix_attempt_count = len(fix_attempts)
-    attempt_word = "attempt" if fix_attempt_count == 1 else "attempts"
     return (
-        f"I attempted a code fix for this issue ({fix_attempt_count} fix {attempt_word} "
-        f"tried), but couldn't land a passing result. Files touched: {files_touched}.\n\n"
+        f"I attempted a code fix for this issue "
+        f"({_plural(len(fix_attempts), 'fix attempt')} tried), but couldn't land a "
+        f"passing result. Files touched: {files_touched}.\n\n"
         f"Last test output:\n```\n{logs_excerpt}\n```"
     )
 
