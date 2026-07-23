@@ -21,3 +21,19 @@ class RunMeta(BaseModel):
     max_iterations: int
     max_cost_usd: float
     errors: list[RunError] = []
+
+    def with_usage(
+        self, *, cost_usd: float = 0.0, tool_calls: int = 0, iterations: int = 0
+    ) -> RunMeta:
+        """Returns a copy with `estimated_cost_usd`/`tool_calls_made`/
+        `iteration_count` each incremented by the given amount (default 0,
+        i.e. unchanged) -- the one place every node accumulates run-level
+        usage onto `RunMeta`, so the accumulation arithmetic isn't
+        hand-duplicated at each call site."""
+        return self.model_copy(
+            update={
+                "estimated_cost_usd": self.estimated_cost_usd + cost_usd,
+                "tool_calls_made": self.tool_calls_made + tool_calls,
+                "iteration_count": self.iteration_count + iterations,
+            }
+        )

@@ -295,13 +295,10 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
 
         run_meta = update.get("run_meta", state["run_meta"])
         cap_hit = len(tool_calls) >= self.max_tool_calls
-        total_cost = run_meta.estimated_cost_usd + trajectory_cost + summarize_cost
-        update["run_meta"] = run_meta.model_copy(
-            update={
-                "estimated_cost_usd": total_cost,
-                "tool_calls_made": run_meta.tool_calls_made + len(tool_calls),
-                "iteration_count": run_meta.iteration_count + 1,
-            }
+        update["run_meta"] = run_meta.with_usage(
+            cost_usd=trajectory_cost + summarize_cost,
+            tool_calls=len(tool_calls),
+            iterations=1,
         )
         log.info(
             "agent_subgraph_finished",

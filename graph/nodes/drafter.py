@@ -194,11 +194,7 @@ class DrafterSubgraph(AgentSubgraph[DraftProposal]):
             # convention this schema otherwise follows (see
             # `ResearcherSubgraph`'s own short-circuit path).
             if sandbox_cost:
-                update["run_meta"] = state["run_meta"].model_copy(
-                    update={
-                        "estimated_cost_usd": state["run_meta"].estimated_cost_usd + sandbox_cost
-                    }
-                )
+                update["run_meta"] = state["run_meta"].with_usage(cost_usd=sandbox_cost)
             return update
 
         # Independent second LLM call: the grounding self-check. See class
@@ -223,12 +219,8 @@ class DrafterSubgraph(AgentSubgraph[DraftProposal]):
         # accumulation or touch iteration_count; assemble_node adds the
         # draft-generation cost and the iteration bump on top of whatever
         # run_meta this method returns.
-        updated_run_meta = state["run_meta"].model_copy(
-            update={
-                "estimated_cost_usd": state["run_meta"].estimated_cost_usd
-                + critique_result.estimated_cost_usd
-                + sandbox_cost
-            }
+        updated_run_meta = state["run_meta"].with_usage(
+            cost_usd=critique_result.estimated_cost_usd + sandbox_cost
         )
         return TriageStateUpdate(draft=draft, status=RunStatus.DRAFTING, run_meta=updated_run_meta)
 

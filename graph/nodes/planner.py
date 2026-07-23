@@ -29,9 +29,6 @@ class PlannerNode(LLMNode):
         result = await self.call_structured(messages, PlannerClassification)
         output = PlannerOutput(**result.parsed.model_dump(), classified_at=datetime.now(UTC))
 
-        run_meta = state["run_meta"]
-        new_cost = run_meta.estimated_cost_usd + result.estimated_cost_usd
-
         log.info(
             "planner_classified",
             issue_number=state["issue"].issue_number,
@@ -45,5 +42,5 @@ class PlannerNode(LLMNode):
         return TriageStateUpdate(
             planner_output=output,
             status=RunStatus.PLANNING,
-            run_meta=run_meta.model_copy(update={"estimated_cost_usd": new_cost}),
+            run_meta=state["run_meta"].with_usage(cost_usd=result.estimated_cost_usd),
         )
