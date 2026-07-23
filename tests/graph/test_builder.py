@@ -12,9 +12,10 @@ import graph.builder as builder_module
 from config.settings import Settings
 from graph.builder import build_graph, handle_node_error
 from graph.nodes.drafter import DrafterSubgraph
-from graph.schemas import IssuePayload, IssueSource, RunStatus
+from graph.schemas import IssuePayload, IssueSource, PostOutcome, RunStatus
 from graph.state import create_initial_state
 from tests.graph.nodes.conftest import (
+    make_fake_auto_post_node,
     make_fake_drafter_subgraph,
     make_fake_planner_node,
     make_fake_risk_check_node,
@@ -37,6 +38,11 @@ def make_issue() -> IssuePayload:
 
 def test_build_graph_registers_all_six_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(builder_module, "PlannerNode", make_fake_planner_node)
+    # AutoPostNode's real __init__ resolves the process-wide GitHubClient
+    # singleton (via Settings) -- faked here so these tests stay hermetic
+    # and don't depend on the developer's local Settings/.env, matching how
+    # PlannerNode/RiskCheckNode/DrafterSubgraph are faked below.
+    monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
     graph = build_graph()
 
     node_names = set(graph.get_graph().nodes.keys())
@@ -54,6 +60,11 @@ async def test_invoke_flows_through_all_nodes_to_auto_post(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(builder_module, "PlannerNode", make_fake_planner_node)
+    # AutoPostNode's real __init__ resolves the process-wide GitHubClient
+    # singleton (via Settings) -- faked here so these tests stay hermetic
+    # and don't depend on the developer's local Settings/.env, matching how
+    # PlannerNode/RiskCheckNode/DrafterSubgraph are faked below.
+    monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
     # DrafterSubgraph never short-circuits (drafting always happens, unlike
     # the Researcher's empty-investigation-plan skip) -- without this fake it
     # would make a real LLM call during this test.
@@ -73,21 +84,34 @@ async def test_invoke_flows_through_all_nodes_to_auto_post(
     # not ours.
     result = await graph.ainvoke(state)  # pyright: ignore[reportUnknownMemberType]
 
-    # Stub RiskCheckNode always reports LOW risk, so this run always takes
-    # the auto_post branch — both branches of route_by_risk are proven
-    # independently in tests/graph/nodes/test_routing.py.
-    assert result["status"] == RunStatus.AUTO_POSTED
+    # The graph is now strictly linear: risk_check -> auto_post ->
+    # approval_queue -> END (no conditional routing). approval_queue is
+    # still a no-op stub (out of scope for this change) that unconditionally
+    # overwrites status to PENDING_APPROVAL, even though the fake
+    # RiskCheckNode reports LOW risk and auto_post's own (dry-run, since
+    # create_initial_state defaults dry_run=True) post_results show the one
+    # drafted action as POSTED.
+    assert result["status"] == RunStatus.PENDING_APPROVAL
     assert result["planner_output"] is not None
     assert result["research_findings"] is not None
     assert result["draft"] is not None
     assert result["risk_assessment"] is not None
-    assert result["run_meta"].iteration_count == 5
+    assert result["run_meta"].dry_run is True
+    post_results = result["post_results"]
+    assert post_results is not None
+    assert [r.outcome for r in post_results.action_results] == [PostOutcome.POSTED]
+    assert result["run_meta"].iteration_count == 6
 
 
 def test_build_graph_threads_checkpointer_through_compile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(builder_module, "PlannerNode", make_fake_planner_node)
+    # AutoPostNode's real __init__ resolves the process-wide GitHubClient
+    # singleton (via Settings) -- faked here so these tests stay hermetic
+    # and don't depend on the developer's local Settings/.env, matching how
+    # PlannerNode/RiskCheckNode/DrafterSubgraph are faked below.
+    monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
     checkpointer = InMemorySaver()
 
     graph = build_graph(checkpointer=checkpointer)
@@ -100,6 +124,11 @@ def test_build_graph_threads_sandbox_handle_into_drafter_subgraph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(builder_module, "PlannerNode", make_fake_planner_node)
+    # AutoPostNode's real __init__ resolves the process-wide GitHubClient
+    # singleton (via Settings) -- faked here so these tests stay hermetic
+    # and don't depend on the developer's local Settings/.env, matching how
+    # PlannerNode/RiskCheckNode/DrafterSubgraph are faked below.
+    monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
     # Spy that wraps the existing `_FakeDrafterSubgraph` test double (so no
     # real LLM call happens if the graph were ever invoked) while capturing
     # the constructed instance itself -- `build_graph()` doesn't return the

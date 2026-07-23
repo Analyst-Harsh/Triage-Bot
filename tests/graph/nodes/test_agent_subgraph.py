@@ -84,6 +84,7 @@ def make_loop_state(
         research_findings=triage_state["research_findings"],
         draft=triage_state["draft"],
         risk_assessment=triage_state["risk_assessment"],
+        post_results=triage_state["post_results"],
         episodic_context=triage_state["episodic_context"],
         status=triage_state["status"],
         run_meta=triage_state["run_meta"],

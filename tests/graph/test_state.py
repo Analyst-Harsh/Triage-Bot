@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from graph.schemas import (
+    ActionPostResult,
     ActionRiskAssessment,
     ActionType,
     CodeFixAction,
@@ -14,6 +15,8 @@ from graph.schemas import (
     IssueSource,
     IssueType,
     PlannerOutput,
+    PostOutcome,
+    PostResults,
     ResearchFindings,
     RiskAssessment,
     RiskLevel,
@@ -42,7 +45,7 @@ def make_issue() -> IssuePayload:
 
 def make_fully_populated_state() -> TriageState:
     issue = make_issue()
-    state = create_initial_state(issue, max_iterations=15, max_cost_usd=2.5)
+    state = create_initial_state(issue, max_iterations=15, max_cost_usd=2.5, dry_run=False)
 
     state["planner_output"] = PlannerOutput(
         issue_type=IssueType.BUG,
@@ -105,6 +108,12 @@ def make_fully_populated_state() -> TriageState:
         ],
         assessed_at=datetime.now(UTC),
     )
+    state["post_results"] = PostResults(
+        action_results=[
+            ActionPostResult(outcome=PostOutcome.QUEUED, detail=None),
+        ],
+        evaluated_at=datetime.now(UTC),
+    )
     state["episodic_context"] = [
         EpisodicMemoryHit(
             past_issue_number=17,
@@ -129,12 +138,14 @@ def test_create_initial_state_defaults() -> None:
     assert state["research_findings"] is None
     assert state["draft"] is None
     assert state["risk_assessment"] is None
+    assert state["post_results"] is None
     assert state["episodic_context"] == []
     assert state["status"] is RunStatus.RECEIVED
     assert state["run_meta"].thread_id == "octo/repo#42"
     assert state["run_meta"].max_iterations == 10
     assert state["run_meta"].max_cost_usd == 1.0
     assert state["run_meta"].iteration_count == 0
+    assert state["run_meta"].dry_run is True
 
 
 def test_checkpoint_serde_round_trip_on_initial_state() -> None:

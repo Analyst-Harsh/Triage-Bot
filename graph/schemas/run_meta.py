@@ -21,6 +21,10 @@ class RunMeta(BaseModel):
     max_iterations: int
     max_cost_usd: float
     errors: list[RunError] = []
+    # When True (the safe default), AutoPostNode computes per-action post
+    # outcomes but skips the actual GitHub write -- the replay pipeline runs
+    # against real historical issues in real repos this bot doesn't own.
+    dry_run: bool = True
 
     def with_usage(
         self, *, cost_usd: float = 0.0, tool_calls: int = 0, iterations: int = 0

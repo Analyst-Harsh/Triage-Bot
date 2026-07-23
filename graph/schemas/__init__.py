@@ -13,6 +13,7 @@ from graph.schemas.enums import (
     ActionType,
     IssueSource,
     IssueType,
+    PostOutcome,
     RiskLevel,
     RunStatus,
 )
@@ -20,6 +21,7 @@ from graph.schemas.grounding import GroundingCritique
 from graph.schemas.issue import IssuePayload
 from graph.schemas.memory import EpisodicMemoryHit
 from graph.schemas.planner import PlannerClassification, PlannerOutput
+from graph.schemas.post_result import ActionPostResult, PostResults
 from graph.schemas.research import Evidence, ResearchFindings, ResearchSummary, ToolCallRecord
 from graph.schemas.risk import (
     ActionRiskAssessment,
@@ -31,6 +33,7 @@ from graph.schemas.run_meta import RunError, RunMeta
 from graph.schemas.sandbox import SandboxAttempt
 
 __all__ = [
+    "ActionPostResult",
     "ActionRiskAssessment",
     "ActionRiskJudgment",
     "ActionType",
@@ -52,6 +55,8 @@ __all__ = [
     "LabelAction",
     "PlannerClassification",
     "PlannerOutput",
+    "PostOutcome",
+    "PostResults",
     "ProposedAction",
     "ResearchFindings",
     "ResearchSummary",

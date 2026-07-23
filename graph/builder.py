@@ -14,7 +14,6 @@ from graph.nodes import (
     PlannerNode,
     ResearcherSubgraph,
     RiskCheckNode,
-    route_by_risk,
 )
 from graph.schemas import RunError, RunStatus
 from graph.state import TriageState, TriageStateUpdate
@@ -51,8 +50,8 @@ def build_graph(
     drafter_tools: list[BaseTool] | None = None,
     drafter_sandbox_handle: SandboxHandle | None = None,
 ) -> CompiledStateGraph[TriageState]:
-    """Wires the Planner -> Researcher -> Drafter -> Risk check ->
-    (auto-post | approval queue) pipeline.
+    """Wires the Planner -> Researcher -> Drafter -> Risk check -> Auto-post
+    -> Approval queue pipeline.
 
     Stays synchronous and does no I/O: `researcher_tools`/`drafter_tools`
     (MCP/Tavily tools, inherently async to load) are injected by the
@@ -66,7 +65,9 @@ def build_graph(
     already-constructed handle (cheap, no I/O per `SandboxHandle`'s lazy
     `ensure_ready()` design) passed straight through to `DrafterSubgraph`,
     which reads it in `finalize()` to resolve a proposed code fix against the
-    sandbox's recorded attempts.
+    sandbox's recorded attempts. `AutoPostNode` similarly resolves its own
+    `GitHubClient` internally (via `get_github_client()`), so it isn't
+    threaded through here at all.
 
     Every simple node here is a `TriageNode` (see `graph/nodes/base.py`).
     The Researcher and the Drafter are `AgentSubgraph`s instead — their own
@@ -101,12 +102,8 @@ def build_graph(
     workflow.add_edge(planner.name, researcher.name)
     workflow.add_edge(researcher.name, drafter.name)
     workflow.add_edge(drafter.name, risk_check.name)
-    workflow.add_conditional_edges(
-        risk_check.name,
-        route_by_risk,
-        {"auto_post": auto_post.name, "approval_queue": approval_queue.name},
-    )
-    workflow.add_edge(auto_post.name, END)
+    workflow.add_edge(risk_check.name, auto_post.name)
+    workflow.add_edge(auto_post.name, approval_queue.name)
     workflow.add_edge(approval_queue.name, END)
 
     return workflow.compile(checkpointer=checkpointer)  # pyright: ignore[reportUnknownMemberType]
