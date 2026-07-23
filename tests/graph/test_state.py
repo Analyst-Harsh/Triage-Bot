@@ -84,6 +84,8 @@ def make_fully_populated_state() -> TriageState:
                         test_command="pytest tests/test_config.py",
                         duration_seconds=0.42,
                     ),
+                    base_commit_sha="a1b2c3d4e5f6",
+                    base_ref="main",
                 ),
                 rationale="Reproduced the crash and verified the fix in sandbox.",
             )

@@ -13,9 +13,17 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     github_token: SecretStr | None = None
     tavily_api_key: SecretStr | None = None
+    e2b_api_key: SecretStr | None = None
 
     llm_request_timeout_seconds: float = 30.0
     llm_max_retries: int = 2
+
+    e2b_sandbox_session_timeout_seconds: float = 900.0
+    e2b_install_timeout_seconds: float = 300.0
+    e2b_test_command_timeout_seconds: float = 180.0
+    e2b_max_billed_seconds_per_run: float = 600.0
+    e2b_cost_per_second_usd: float = 0.000028
+    e2b_restrict_network: bool = True
 
     # GitHub's officially-hosted remote MCP server (streamable-HTTP transport).
     github_mcp_url: str = "https://api.githubcopilot.com/mcp/"
@@ -30,6 +38,9 @@ class Settings(BaseSettings):
     # Bounds context/cost blowup from a single huge file or webpage returned
     # by an untrusted research tool call.
     researcher_tool_output_max_chars: int = 8_000
+    drafter_file_read_max_chars: int = 16_000
+    drafter_test_log_success_max_chars: int = 500
+    drafter_test_log_failure_max_chars: int = 3_000
 
 
 @lru_cache

@@ -3,10 +3,11 @@ from typing import Any
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_core.tools import BaseTool
+from pydantic import Field
 
 from graph.nodes.drafter import DrafterSubgraph
 from graph.nodes.planner import PlannerNode
@@ -21,6 +22,7 @@ from graph.schemas import (
     ProposedAction,
 )
 from graph.state import TriageState, create_initial_state
+from tools.sandbox import SandboxHandle
 
 
 def make_issue() -> IssuePayload:
@@ -54,6 +56,20 @@ class FakeStructuredChatModel(BaseChatModel):
     parsed_results_by_schema: dict[type, Any] | None = None
     raise_on_generate: bool = False
     fail_parse: bool = False
+    # If > 0, `_parse` raises for exactly this many calls, then succeeds --
+    # lets a test verify retry-then-succeed behavior (call_structured's
+    # in-place repair loop) rather than only ever-fails/never-fails.
+    fail_parse_times: int = 0
+    # Like `fail_parse_times`, but raises a genuine `pydantic.ValidationError`
+    # (via validating an empty payload against `schema`) instead of a plain
+    # `ValueError` -- lets a test verify call_structured's repair loop
+    # actually appends a corrective message on this specific exception type.
+    raise_validation_error_times: int = 0
+    parse_attempts: int = 0
+    # Captures exactly what each _generate call actually received -- lets a
+    # test assert on the real (possibly clamped/cleared) messages a caller
+    # sent, rather than trusting that the caller sent what it intended to.
+    received_messages: list[list[BaseMessage]] = Field(default_factory=list[list[BaseMessage]])
 
     @property
     def _llm_type(self) -> str:
@@ -61,11 +77,12 @@ class FakeStructuredChatModel(BaseChatModel):
 
     def _generate(
         self,
-        messages: Any,  # noqa: ARG002
+        messages: list[BaseMessage],
         stop: list[str] | None = None,  # noqa: ARG002
         run_manager: Any = None,  # noqa: ARG002
         **kwargs: Any,  # noqa: ARG002
     ) -> ChatResult:
+        self.received_messages.append(messages)
         if self.raise_on_generate:
             raise RuntimeError("fake API failure")
         return ChatResult(generations=[ChatGeneration(message=self.response)])
@@ -74,6 +91,12 @@ class FakeStructuredChatModel(BaseChatModel):
         def _parse(_: AIMessage) -> Any:
             if self.fail_parse:
                 raise ValueError("fake parsing failure")
+            if self.fail_parse_times > 0 or self.raise_validation_error_times > 0:
+                self.parse_attempts += 1
+                if self.parse_attempts <= self.raise_validation_error_times:
+                    schema.model_validate({})  # raises pydantic.ValidationError
+                if self.parse_attempts <= self.fail_parse_times:
+                    raise ValueError("fake parsing failure (transient)")
             if self.parsed_results_by_schema is not None:
                 return self.parsed_results_by_schema[schema]
             return self.parsed_result
@@ -90,6 +113,8 @@ def make_fake_chat_model(
     parsed_results_by_schema: dict[type, Any] | None = None,
     raise_on_generate: bool = False,
     fail_parse: bool = False,
+    fail_parse_times: int = 0,
+    raise_validation_error_times: int = 0,
 ) -> FakeStructuredChatModel:
     return FakeStructuredChatModel(
         response=AIMessage(
@@ -105,6 +130,8 @@ def make_fake_chat_model(
         parsed_results_by_schema=parsed_results_by_schema,
         raise_on_generate=raise_on_generate,
         fail_parse=fail_parse,
+        fail_parse_times=fail_parse_times,
+        raise_validation_error_times=raise_validation_error_times,
     )
 
 
@@ -148,8 +175,14 @@ class _FakeDrafterSubgraph(DrafterSubgraph):
     graph needs this rather than the real class, which would otherwise
     attempt a real LLM call."""
 
-    def __init__(self, tools: list[BaseTool] | None = None) -> None:
+    def __init__(
+        self,
+        tools: list[BaseTool] | None = None,
+        *,
+        sandbox_handle: SandboxHandle | None = None,
+    ) -> None:
         self._tools = tools or []
+        self._sandbox_handle = sandbox_handle
         self._primary_model = make_fake_chat_model(
             model_name="gpt-4o-mini",
             parsed_results_by_schema={
@@ -168,5 +201,7 @@ class _FakeDrafterSubgraph(DrafterSubgraph):
         self._fallback_model = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
 
 
-def make_fake_drafter_subgraph(tools: list[BaseTool] | None = None) -> DrafterSubgraph:
-    return _FakeDrafterSubgraph(tools)
+def make_fake_drafter_subgraph(
+    tools: list[BaseTool] | None = None, *, sandbox_handle: SandboxHandle | None = None
+) -> DrafterSubgraph:
+    return _FakeDrafterSubgraph(tools, sandbox_handle=sandbox_handle)

@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from graph.schemas import (
     CloseAction,
     CodeFixAction,
+    CodeFixIntent,
     CommentAction,
     DraftedAction,
     DraftOutput,
@@ -107,8 +108,10 @@ def test_drafted_action_json_round_trip() -> None:
 
 def test_drafted_action_accepts_code_fix_action() -> None:
     """`DraftedAction.action` is typed against the full `DraftAction` union
-    (unlike `ProposedAction`, restricted to `NonCodeDraftAction`) so this
-    shape doesn't need to change once the sandbox code-fix path lands."""
+    (unlike `ProposedAction`, restricted to `DraftIntent`) so this shape
+    didn't need to change now that the sandbox code-fix path has landed --
+    it just started populating the `code_fix` variant that was always a
+    valid member of this type."""
     drafted = make_drafted_action(
         action=CodeFixAction(
             diff="--- a/foo.py\n+++ b/foo.py\n",
@@ -119,9 +122,40 @@ def test_drafted_action_accepts_code_fix_action() -> None:
                 test_command="pytest tests/test_foo.py",
                 duration_seconds=1.23,
             ),
+            base_commit_sha="a1b2c3d4e5f6",
+            base_ref="main",
         )
     )
     assert isinstance(drafted.action, CodeFixAction)
+
+
+def test_proposed_action_accepts_code_fix_intent() -> None:
+    proposed = make_proposed_action(action=CodeFixIntent())
+    assert isinstance(proposed.action, CodeFixIntent)
+
+
+def test_proposed_action_rejects_raw_code_fix_action_payload() -> None:
+    """`ProposedAction.action` is typed as `DraftIntent`, whose `code_fix`
+    variant is `CodeFixIntent` — a raw `CodeFixAction`-shaped payload (with
+    a fabricated diff/target_files/sandbox_result) must be rejected."""
+    payload = {
+        "action": {
+            "action_type": "code_fix",
+            "diff": "--- a/foo.py\n+++ b/foo.py\n",
+            "target_files": ["foo.py"],
+            "sandbox_result": {
+                "passed": True,
+                "logs": "1 passed",
+                "test_command": "pytest tests/test_foo.py",
+                "duration_seconds": 1.23,
+            },
+            "base_commit_sha": "a1b2c3d4e5f6",
+            "base_ref": "main",
+        },
+        "rationale": "Attempting a code fix.",
+    }
+    with pytest.raises(ValidationError):
+        ProposedAction.model_validate(payload)
 
 
 def test_draft_construction() -> None:

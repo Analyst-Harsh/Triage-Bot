@@ -18,8 +18,8 @@ class PlannerNode(LLMNode):
 
     name: ClassVar[NodeName] = NodeName.PLANNER
     llm_config: ClassVar[NodeLLMConfig] = NodeLLMConfig(
-        primary=LLMEndpointConfig(provider="openai", model="gpt-4o-mini"),
-        fallback=LLMEndpointConfig(provider="anthropic", model="claude-haiku-4-5-20251001"),
+        primary=LLMEndpointConfig(provider="openai", model="gpt-5.4-nano", temperature=0.0),
+        fallback=LLMEndpointConfig(provider="openai", model="gpt-5-nano", temperature=0.0),
     )
 
     async def execute(self, state: TriageState) -> TriageStateUpdate:

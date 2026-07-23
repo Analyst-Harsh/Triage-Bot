@@ -3,7 +3,12 @@ from typing import Annotated, ClassVar, TypedDict, cast
 
 import structlog
 from langchain.agents import create_agent  # pyright: ignore[reportUnknownVariableType]
-from langchain.agents.middleware import ModelFallbackMiddleware, ToolCallLimitMiddleware
+from langchain.agents.middleware import (
+    ClearToolUsesEdit,
+    ContextEditingMiddleware,
+    ModelFallbackMiddleware,
+    ToolCallLimitMiddleware,
+)
 from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
@@ -14,6 +19,7 @@ from pydantic import BaseModel
 from config.settings import get_settings
 from graph.nodes.node_names import NodeName
 from graph.nodes.trajectory import (
+    clamp_trajectory_for_model_call,
     derive_tool_call_records,
     estimate_trajectory_cost,
     resolve_dangling_tool_calls,
@@ -80,6 +86,33 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
     llm_config: ClassVar[NodeLLMConfig]
     max_tool_calls: ClassVar[int]
     summary_schema: ClassVar[type[BaseModel]]
+
+    # Every in-loop model call resends the full accumulated trajectory,
+    # ToolMessage content included -- with no bound on cumulative size,
+    # tool-heavy runs (the Drafter's sandbox loop) can grow into TPM
+    # rate-limit territory after 8-10+ tool calls. These three tune
+    # ContextEditingMiddleware/ClearToolUsesEdit (see build_agent) rather
+    # than living in Settings: they're algorithmic constants tied to this
+    # node's own tool-output budgets, the same category as
+    # DRAFTER_MAX_TOOL_CALLS/RESEARCHER_MAX_TOOL_CALLS, not "ops-tunable
+    # infra values" (Settings' own docstring scope).
+    #
+    # trigger=20_000 (vs. the library default 100_000): drafter_file_read_max_chars
+    # =16_000 chars is ~4,000-4,800 tokens per read_file call, so 20,000
+    # engages proactively around the observed 8-10-call inflection point
+    # rather than reactively near a 30-call worst case.
+    context_edit_trigger_tokens: ClassVar[int] = 20_000
+    # keep=6 (vs. library default 3): DRAFTER_MAX_TOOL_CALLS's own budget
+    # comment counts ~4 tool calls per fix cycle (read+edit+run) -- keeping
+    # 6 preserves roughly the current + previous cycle's outputs verbatim,
+    # so a model that just edit_file'd and wants to read_file its own diff
+    # doesn't find that exact result already cleared (costs one extra tool
+    # call if it does, well inside budget -- not a correctness bug).
+    context_edit_keep_tool_results: ClassVar[int] = 6
+    context_edit_placeholder: ClassVar[str] = (
+        "[tool output cleared to manage context size -- call this tool "
+        "again if you need the original data]"
+    )
 
     def __init__(self, tools: list[BaseTool]) -> None:
         """Tools are injected (loaded by the composition root — see
@@ -172,6 +205,38 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
     def route_after_prepare(self, state: AgentLoopState) -> str:
         return "agent" if state["messages"] else "assemble"
 
+    def _middleware(
+        self,
+    ) -> list[ContextEditingMiddleware | ToolCallLimitMiddleware | ModelFallbackMiddleware]:
+        """`ContextEditingMiddleware` first (outermost): `ToolCallLimitMiddleware`
+        only implements `after_model`, never `wrap_model_call`, so its position
+        relative to the other two is inert either way. `ModelFallbackMiddleware`
+        does participate in `wrap_model_call` -- placing the context edit
+        outermost means its (deterministic, cheap) clearing pass is computed
+        once per turn and reused by any same-turn fallback retry, rather than
+        recomputed per attempt.
+
+        `ContextEditingMiddleware.wrap_model_call` only edits the ephemeral
+        outgoing request for one model call -- it never returns a state
+        update, so it never touches the persisted `AgentLoopState.messages`
+        channel (verified by reading the installed langchain source directly).
+        `summarize_node`'s own structured-output call isn't routed through
+        this middleware at all, which is why it applies the same
+        `ClearToolUsesEdit` logic itself, via `clamp_trajectory_for_model_call`."""
+        return [
+            ContextEditingMiddleware(
+                edits=(
+                    ClearToolUsesEdit(
+                        trigger=self.context_edit_trigger_tokens,
+                        keep=self.context_edit_keep_tool_results,
+                        placeholder=self.context_edit_placeholder,
+                    ),
+                ),
+            ),
+            ToolCallLimitMiddleware(run_limit=self.max_tool_calls, exit_behavior="end"),
+            ModelFallbackMiddleware(self._fallback_model),
+        ]
+
     def build_agent(
         self,
     ) -> CompiledStateGraph[AgentLoopState, None, AgentLoopState, AgentLoopState]:
@@ -180,15 +245,11 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         # category of third-party stub incompleteness as the ChatAnthropic/
         # ChatOpenAI `reportCallIssue` ignores in llm/factory.py, verified
         # working at runtime (see the spike in the implementation plan).
-        middleware = [
-            ToolCallLimitMiddleware(run_limit=self.max_tool_calls, exit_behavior="end"),
-            ModelFallbackMiddleware(self._fallback_model),
-        ]
         return create_agent(  # pyright: ignore[reportCallIssue, reportUnknownVariableType]
             self._primary_model,
             tools=self._tools,
             system_prompt=self.system_prompt(),
-            middleware=middleware,  # pyright: ignore[reportArgumentType]
+            middleware=self._middleware(),  # pyright: ignore[reportArgumentType]
         )
 
     async def summarize_node(self, state: AgentLoopState) -> _LoopUpdate:
@@ -200,8 +261,22 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         # `resolve_dangling_tool_calls`'s docstring for why this can't just
         # be appended via the `messages` channel's reducer.
         messages = resolve_dangling_tool_calls(state["messages"])
+        # This call sits outside build_agent()'s create_agent loop, so
+        # ContextEditingMiddleware never runs over it -- apply the same
+        # deterministic clearing pass directly, on a throwaway copy, so
+        # this one structured-output call doesn't resend the full,
+        # unpruned trajectory. state["messages"] itself is untouched: the
+        # checkpoint stays a faithful record (see
+        # resolve_dangling_tool_calls's own docstring for the same
+        # precedent).
+        clamped_messages = clamp_trajectory_for_model_call(
+            messages,
+            trigger=self.context_edit_trigger_tokens,
+            keep=self.context_edit_keep_tool_results,
+            placeholder=self.context_edit_placeholder,
+        )
         result = await call_structured(
-            self._primary_model, self._fallback_model, messages, self.summary_schema
+            self._primary_model, self._fallback_model, clamped_messages, self.summary_schema
         )
         return _LoopUpdate(summary=result.parsed, summarize_cost=result.estimated_cost_usd)
 

@@ -1,7 +1,10 @@
 from collections.abc import Sequence
+from copy import deepcopy
 from typing import cast
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain.agents.middleware import ClearToolUsesEdit
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
+from langchain_core.messages.utils import count_tokens_approximately
 from pydantic import JsonValue
 
 from graph.schemas import ToolCallRecord
@@ -103,6 +106,30 @@ def resolve_dangling_tool_calls(messages: Sequence[BaseMessage]) -> list[BaseMes
             if patch is not None:
                 resolved.append(patch)
     return resolved
+
+
+def clamp_trajectory_for_model_call(
+    messages: Sequence[BaseMessage], *, trigger: int, keep: int, placeholder: str
+) -> list[BaseMessage]:
+    """Applies the same deterministic tool-result clearing
+    `ContextEditingMiddleware`/`ClearToolUsesEdit` applies to every in-loop
+    model call, to the one model call that sits outside that loop:
+    `AgentSubgraph.summarize_node`'s structured-output pass.
+    `ContextEditingMiddleware.wrap_model_call` only edits its ephemeral
+    outgoing request -- it never persists into the graph's checkpointed
+    `messages` channel, so `summarize_node` needs its own pass rather than
+    inheriting the loop's.
+
+    Operates on a deep copy: `ClearToolUsesEdit.apply` mutates its argument
+    in place, and the input trajectory must stay untouched -- the
+    checkpointed state stays a faithful, unpruned record either way (same
+    "never written back" precedent as `resolve_dangling_tool_calls`).
+    """
+    edited = cast(list[AnyMessage], deepcopy(list(messages)))
+    ClearToolUsesEdit(trigger=trigger, keep=keep, placeholder=placeholder).apply(
+        edited, count_tokens=count_tokens_approximately
+    )
+    return cast(list[BaseMessage], edited)
 
 
 def estimate_trajectory_cost(messages: Sequence[BaseMessage]) -> float:
