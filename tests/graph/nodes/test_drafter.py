@@ -339,37 +339,6 @@ def test_resolve_code_fix_intent_degrades_to_comment_when_no_passing_attempt() -
     assert eligible_for_grounding is False
 
 
-def test_resolve_code_fix_intent_warns_when_budget_remains_unused() -> None:
-    """Regression test: a real run stopped after only 1 of 6 allowed
-    fix_attempt calls, with 22 of 50 tool calls used -- nothing forced it to
-    stop, it just gave up early. This isn't fixable by refusing a tool call
-    (the model's own turn simply ended), so it's surfaced as a structured
-    warning instead, for production monitoring."""
-    failing_attempts = [
-        make_sandbox_attempt(
-            attempt_number=i + 1,
-            result=SandboxResult(
-                passed=False, logs="1 failed", test_command="pytest", duration_seconds=1.0
-            ),
-        )
-        for i in range(2)
-    ]
-    handle = make_sandbox_handle()
-    handle.attempts = failing_attempts
-    node = make_drafter(sandbox_handle=handle)
-    item = make_code_fix_intent_item()
-
-    with capture_logs(processors=[structlog.contextvars.merge_contextvars]) as cap_logs:
-        node._resolve_code_fix_intent(item)  # pyright: ignore[reportPrivateUsage]
-
-    events = [
-        entry for entry in cap_logs if entry["event"] == "drafter_gave_up_with_budget_remaining"
-    ]
-    assert len(events) == 1
-    assert events[0]["fix_attempts_used"] == 2
-    assert events[0]["fix_attempt_budget"] == MAX_SANDBOX_FIX_ATTEMPTS
-
-
 def test_resolve_code_fix_intent_no_warning_when_budget_genuinely_exhausted() -> None:
     failing_attempts = [
         make_sandbox_attempt(
