@@ -18,6 +18,7 @@ from tests.graph.nodes.conftest import (
     make_fake_auto_post_node,
     make_fake_drafter_subgraph,
     make_fake_planner_node,
+    make_fake_researcher_subgraph,
     make_fake_risk_check_node,
 )
 from tools.sandbox import SandboxHandle
@@ -41,8 +42,18 @@ def test_build_graph_registers_all_six_nodes(monkeypatch: pytest.MonkeyPatch) ->
     # AutoPostNode's real __init__ resolves the process-wide GitHubClient
     # singleton (via Settings) -- faked here so these tests stay hermetic
     # and don't depend on the developer's local Settings/.env, matching how
-    # PlannerNode/RiskCheckNode/DrafterSubgraph are faked below.
+    # PlannerNode/RiskCheckNode/DrafterSubgraph/ResearcherSubgraph are faked
+    # below.
     monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
+    # ResearcherSubgraph/DrafterSubgraph/RiskCheckNode's real __init__s all
+    # build real OpenAI chat clients via Settings -- faked for the same
+    # hermeticity reason as AutoPostNode above. `build_graph()` constructs
+    # every node unconditionally, so even this purely-structural test (no
+    # invocation) needs all of them faked, not just the ones it's asserting
+    # on.
+    monkeypatch.setattr(builder_module, "ResearcherSubgraph", make_fake_researcher_subgraph)
+    monkeypatch.setattr(builder_module, "DrafterSubgraph", make_fake_drafter_subgraph)
+    monkeypatch.setattr(builder_module, "RiskCheckNode", make_fake_risk_check_node)
     graph = build_graph()
 
     node_names = set(graph.get_graph().nodes.keys())
@@ -65,6 +76,10 @@ async def test_invoke_flows_through_all_nodes_to_auto_post(
     # and don't depend on the developer's local Settings/.env, matching how
     # PlannerNode/RiskCheckNode/DrafterSubgraph are faked below.
     monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
+    # ResearcherSubgraph's real __init__ builds a real OpenAI chat client via
+    # Settings -- faked here so this test stays hermetic and doesn't depend
+    # on the developer's local Settings/.env, matching AutoPostNode above.
+    monkeypatch.setattr(builder_module, "ResearcherSubgraph", make_fake_researcher_subgraph)
     # DrafterSubgraph never short-circuits (drafting always happens, unlike
     # the Researcher's empty-investigation-plan skip) -- without this fake it
     # would make a real LLM call during this test.
@@ -112,6 +127,13 @@ def test_build_graph_threads_checkpointer_through_compile(
     # and don't depend on the developer's local Settings/.env, matching how
     # PlannerNode/RiskCheckNode/DrafterSubgraph are faked below.
     monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
+    # ResearcherSubgraph/DrafterSubgraph/RiskCheckNode's real __init__s all
+    # build real OpenAI chat clients via Settings -- faked here for the same
+    # hermeticity reason as AutoPostNode above; `build_graph()` constructs
+    # every node unconditionally regardless of what this test asserts on.
+    monkeypatch.setattr(builder_module, "ResearcherSubgraph", make_fake_researcher_subgraph)
+    monkeypatch.setattr(builder_module, "DrafterSubgraph", make_fake_drafter_subgraph)
+    monkeypatch.setattr(builder_module, "RiskCheckNode", make_fake_risk_check_node)
     checkpointer = InMemorySaver()
 
     graph = build_graph(checkpointer=checkpointer)
@@ -129,6 +151,14 @@ def test_build_graph_threads_sandbox_handle_into_drafter_subgraph(
     # and don't depend on the developer's local Settings/.env, matching how
     # PlannerNode/RiskCheckNode/DrafterSubgraph are faked below.
     monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
+    # ResearcherSubgraph's real __init__ builds a real OpenAI chat client via
+    # Settings -- faked here so this test stays hermetic and doesn't depend
+    # on the developer's local Settings/.env, matching AutoPostNode above.
+    monkeypatch.setattr(builder_module, "ResearcherSubgraph", make_fake_researcher_subgraph)
+    # RiskCheckNode's real __init__ builds a real OpenAI chat client via
+    # Settings too -- faked for the same reason, since `build_graph()`
+    # constructs it unconditionally regardless of what this test asserts on.
+    monkeypatch.setattr(builder_module, "RiskCheckNode", make_fake_risk_check_node)
     # Spy that wraps the existing `_FakeDrafterSubgraph` test double (so no
     # real LLM call happens if the graph were ever invoked) while capturing
     # the constructed instance itself -- `build_graph()` doesn't return the

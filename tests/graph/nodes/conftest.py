@@ -10,9 +10,11 @@ from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_core.tools import BaseTool
 from pydantic import Field
 
+from config.settings import get_settings
 from graph.nodes.auto_post import AutoPostNode
 from graph.nodes.drafter import DrafterSubgraph
 from graph.nodes.planner import PlannerNode
+from graph.nodes.researcher import ResearcherSubgraph
 from graph.nodes.risk_check import RiskCheckNode
 from graph.nodes.utils.action_executor import ActionExecutor
 from graph.schemas import (
@@ -27,6 +29,7 @@ from graph.schemas import (
     PlannerClassification,
     PostOutcome,
     ProposedAction,
+    ResearchSummary,
     RiskJudgmentBatch,
     RiskLevel,
 )
@@ -204,6 +207,31 @@ def make_fake_risk_check_node(*, parsed_result: RiskJudgmentBatch | None = None)
     primary = make_fake_chat_model(model_name="gpt-4o-mini", parsed_result=parsed_result)
     fallback = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
     return _FakeRiskCheckNode(primary_model=primary, fallback_model=fallback)
+
+
+class _FakeResearcherSubgraph(ResearcherSubgraph):
+    """Test double: overrides `AgentSubgraph.__init__` (inherited by
+    `ResearcherSubgraph`) to accept chat models directly instead of building
+    them from `Settings` -- a drop-in replacement for `ResearcherSubgraph`
+    itself (same single-`tools`-arg call signature), so it can be swapped in
+    via `monkeypatch.setattr(builder_module, "ResearcherSubgraph", ...)` in
+    `test_builder.py`/`test_checkpointer.py`, matching `_FakeDrafterSubgraph`.
+    `self._settings` is still real (`get_settings()`, no I/O, no credential
+    needed) since `ResearcherSubgraph.finalize()` reads
+    `self._settings.docmind_mcp_command`."""
+
+    def __init__(self, tools: list[BaseTool] | None = None) -> None:
+        self._tools = tools or []
+        self._settings = get_settings()
+        self._primary_model = make_fake_chat_model(
+            model_name="gpt-4o-mini",
+            parsed_result=ResearchSummary(summary="Test double research summary.", confidence=0.9),
+        )
+        self._fallback_model = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
+
+
+def make_fake_researcher_subgraph(tools: list[BaseTool] | None = None) -> ResearcherSubgraph:
+    return _FakeResearcherSubgraph(tools)
 
 
 class _FakeDrafterSubgraph(DrafterSubgraph):
