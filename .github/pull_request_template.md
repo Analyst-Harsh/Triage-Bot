@@ -23,7 +23,10 @@
 
 - [ ] `uv run ruff format --check .`
 - [ ] `uv run ruff check .`
-- [ ] `uv run pyright`
+- [ ] `uv run pyright` (strict mode, whole project)
+- [ ] No TODOs, swallowed exceptions, or disabled lint/type rules without an inline reason
+- [ ] No secrets in the diff or commit messages (`detect-secrets` should already have caught this locally)
+- [ ] Docs updated if behavior changed (`AGENTS.md`, `docs/agent/*.md`, or `docs/summary.md`)
 
 ## Related issues
 
