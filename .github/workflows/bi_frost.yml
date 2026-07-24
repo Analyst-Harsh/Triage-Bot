@@ -19,9 +19,20 @@ jobs:
     name: Format, Lint, Type check and Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Overrides the workflow-level `contents: read` default: the coverage
+    # comment step needs to post/update a PR comment and push coverage data
+    # to the action's dedicated `python-coverage-comment-action-data` branch.
+    # Scoped to this job only -- no other step needs write access.
+    permissions:
+      pull-requests: write
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # python-coverage-comment-action's git operations (updating its
+          # data branch) reuse the token checkout leaves behind.
+          persist-credentials: true
 
       - name: Install uv
         uses: astral-sh/setup-uv@v9.0.0
@@ -47,7 +58,17 @@ jobs:
 
       - name: Test
         id: test
-        run: uv run pytest -q
+        run: uv run pytest -q --cov --cov-report=term-missing
+
+      - name: Coverage comment
+        # Only meaningful on a PR (posts/updates the diff-coverage comment)
+        # or a push to main (updates the coverage badge/data branch) --
+        # skipped on workflow_dispatch against an arbitrary ref, and skipped
+        # entirely if the Test step above failed.
+        if: success() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+        uses: py-cov-action/python-coverage-comment-action@5d8df5979747514c914e1c5a12335a7cf9a2745f # v4.1
+        with:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Job summary
         if: always()
