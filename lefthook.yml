@@ -12,6 +12,8 @@ pre-commit:
     pyright:
       glob: "*.py"
       run: uv run pyright {staged_files}
+    detect-secrets:
+      run: uv run detect-secrets-hook --baseline .secrets.baseline {staged_files}
 
 # Fast pre-commit only checks staged files, so a change can still break
 # something elsewhere that wasn't touched in that commit. pre-push is the
@@ -29,3 +31,5 @@ pre-push:
       run: uv run pyright
     pytest:
       run: uv run pytest -q
+    pip-audit:
+      run: uv run pip-audit

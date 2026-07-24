@@ -56,6 +56,10 @@ jobs:
         id: type-check
         run: uv run pyright
 
+      - name: Secret scan
+        id: secret-scan
+        run: uv run detect-secrets-hook --baseline .secrets.baseline $(git ls-files)
+
       - name: Test
         id: test
         run: uv run pytest -q --cov --cov-report=term-missing
@@ -80,5 +84,6 @@ jobs:
             echo "| Format check | $(icon ${{ steps.format-check.outcome }}) |"
             echo "| Lint | $(icon ${{ steps.lint.outcome }}) |"
             echo "| Type check | $(icon ${{ steps.type-check.outcome }}) |"
+            echo "| Secret scan | $(icon ${{ steps.secret-scan.outcome }}) |"
             echo "| Test | $(icon ${{ steps.test.outcome }}) |"
           } >> "$GITHUB_STEP_SUMMARY"

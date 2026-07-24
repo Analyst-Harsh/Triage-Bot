@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(.env)", "Edit(.env)",
+      "Read(.env.local)", "Edit(.env.local)",
+      "Read(.env.production)", "Edit(.env.production)",
+      "Read(.env.development)", "Edit(.env.development)",
+      "Read(.env.staging)", "Edit(.env.staging)",
+      "Read(.env.test)", "Edit(.env.test)",
+      "Read(*.pem)", "Edit(*.pem)",
+      "Read(*.key)", "Edit(*.key)",
+      "Read(id_rsa*)", "Edit(id_rsa*)",
+      "Read(id_ed25519*)", "Edit(id_ed25519*)",
+      "Read(credentials.json)", "Edit(credentials.json)",
+      "Read(*serviceaccount*.json)", "Edit(*serviceaccount*.json)",
+      "Read(.ssh/**)", "Edit(.ssh/**)",
+      "Read(.aws/**)", "Edit(.aws/**)",
+      "Read(secrets/**)", "Edit(secrets/**)"
+    ],
+    "allow": [
+      "Bash(uv run ruff check .)",
+      "Bash(uv run ruff format --check .)",
+      "Bash(uv run pyright)",
+      "Bash(uv run pytest)",
+      "Bash(uv run pytest *)",
+      "Read(**)",
+      "Grep(**)",
+      "Glob(**)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/verify-python.sh",
+            "if": "Edit(*.py)|Write(*.py)",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
