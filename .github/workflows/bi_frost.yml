@@ -1,0 +1,62 @@
+name: BiFrost
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Format, Lint, Type check and Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Format check
+        id: format-check
+        run: uv run ruff format --check .
+
+      - name: Lint
+        id: lint
+        run: uv run ruff check .
+
+      - name: Type check
+        id: type-check
+        run: uv run pyright
+
+      - name: Test
+        id: test
+        run: uv run pytest -q
+
+      - name: Job summary
+        if: always()
+        run: |
+          icon() { case "$1" in success) echo "✅";; failure) echo "❌";; skipped) echo "⏭️";; *) echo "⚠️";; esac; }
+          {
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| Format check | $(icon ${{ steps.format-check.outcome }}) |"
+            echo "| Lint | $(icon ${{ steps.lint.outcome }}) |"
+            echo "| Type check | $(icon ${{ steps.type-check.outcome }}) |"
+            echo "| Test | $(icon ${{ steps.test.outcome }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"
