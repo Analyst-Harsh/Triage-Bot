@@ -129,7 +129,6 @@ def _build_pr_body(issue: IssuePayload, rationale: str, action: CodeFixAction) -
     status = "passed" if sandbox.passed else "FAILED"
     return (
         f"Fixes #{issue.issue_number}\n\n"
-        f"{issue.url}\n\n"
         "## Rationale\n"
         f"{rationale}\n\n"
         "## Sandbox verification\n"

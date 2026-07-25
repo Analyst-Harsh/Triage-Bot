@@ -25,8 +25,8 @@ from tools.mcp_clients import researcher_toolset
 from tools.sandbox import sandbox_toolset
 from utils.github_client import get_github_client
 
-REPO_FULL_NAME = "arrow-py/arrow"
-ISSUE_NUMBER = 1278
+REPO_FULL_NAME = "Analyst-Harsh/triage-bot-test"
+ISSUE_NUMBER = 3
 RESULTS_DIR = Path("results")
 
 log = structlog.get_logger(__name__)
@@ -153,7 +153,7 @@ async def main() -> None:
             result = await resume_paused_run(graph, config, snapshot.interrupts[0].value)
         else:
             issue = github_client.fetch_issue(REPO_FULL_NAME, ISSUE_NUMBER)
-            state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
+            state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0, dry_run=False)
             log.info(
                 "run_started",
                 repo=REPO_FULL_NAME,
