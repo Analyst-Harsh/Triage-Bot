@@ -98,15 +98,17 @@ async def test_low_risk_actions_are_routed_to_action_executor_in_order(
     ]
 
     issue = triage_state["issue"]
+    run_id = triage_state["run_meta"].run_id
     assert action_executor.execute.await_count == 2
     action_executor.execute.assert_any_await(
-        triage_state["draft"].actions[0].action, issue, dry_run=False
+        triage_state["draft"].actions[0], issue, dry_run=False, run_id=run_id
     )
     action_executor.execute.assert_any_await(
-        triage_state["draft"].actions[2].action, issue, dry_run=False
+        triage_state["draft"].actions[2], issue, dry_run=False, run_id=run_id
     )
     assert "status" in update
-    assert update["status"] == RunStatus.AUTO_POSTED
+    # One action (index 1) was queued as MEDIUM risk -- the run isn't done.
+    assert update["status"] == RunStatus.PENDING_APPROVAL
 
 
 async def test_non_low_risk_actions_never_reach_action_executor(
@@ -124,6 +126,21 @@ async def test_non_low_risk_actions_never_reach_action_executor(
     assert post_results is not None
     assert post_results.action_results == [ActionPostResult(outcome=PostOutcome.QUEUED)]
     action_executor.execute.assert_not_awaited()
+    assert "status" in update
+    assert update["status"] == RunStatus.PENDING_APPROVAL
+
+
+async def test_all_low_risk_actions_set_status_auto_posted(triage_state: TriageState) -> None:
+    triage_state["draft"] = _draft([_comment_action(), _label_action()])
+    triage_state["risk_assessment"] = _risk([RiskLevel.LOW, RiskLevel.LOW])
+    action_executor = make_fake_action_executor()
+    action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
+    node = make_fake_auto_post_node(action_executor)
+
+    update = await node.execute(triage_state)
+
+    assert "status" in update
+    assert update["status"] == RunStatus.AUTO_POSTED
 
 
 async def test_raises_when_draft_or_risk_assessment_missing(triage_state: TriageState) -> None:

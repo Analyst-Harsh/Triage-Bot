@@ -27,7 +27,7 @@ def configure_logging() -> None:
     duplicating handlers; a second call is a no-op.
 
     Env vars (read directly via `os.environ.get`, matching the
-    no-settings-framework precedent set by `api/github_client.py`'s
+    no-settings-framework precedent set by `utils/github_client.py`'s
     `GITHUB_TOKEN` handling):
       LOG_LEVEL: stdlib level name, default "INFO". Unrecognized values
         fall back to INFO rather than raising.

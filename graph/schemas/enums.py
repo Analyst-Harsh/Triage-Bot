@@ -47,3 +47,4 @@ class PostOutcome(StrEnum):
     POSTED = "posted"
     FAILED = "failed"
     QUEUED = "queued"
+    REJECTED = "rejected"

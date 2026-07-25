@@ -14,6 +14,7 @@ from graph.nodes import (
     PlannerNode,
     ResearcherSubgraph,
     RiskCheckNode,
+    route_after_auto_post,
 )
 from graph.schemas import RunError, RunStatus
 from graph.state import TriageState, TriageStateUpdate
@@ -51,7 +52,10 @@ def build_graph(
     drafter_sandbox_handle: SandboxHandle | None = None,
 ) -> CompiledStateGraph[TriageState]:
     """Wires the Planner -> Researcher -> Drafter -> Risk check -> Auto-post
-    -> Approval queue pipeline.
+    pipeline. From `auto_post`, `route_after_auto_post` conditionally routes
+    to `approval_queue` only when at least one drafted action was left
+    queued (non-LOW risk); an all-LOW-risk run ends right after `auto_post`
+    instead.
 
     Stays synchronous and does no I/O: `researcher_tools`/`drafter_tools`
     (MCP/Tavily tools, inherently async to load) are injected by the
@@ -103,7 +107,7 @@ def build_graph(
     workflow.add_edge(researcher.name, drafter.name)
     workflow.add_edge(drafter.name, risk_check.name)
     workflow.add_edge(risk_check.name, auto_post.name)
-    workflow.add_edge(auto_post.name, approval_queue.name)
+    workflow.add_conditional_edges(auto_post.name, route_after_auto_post)  # pyright: ignore[reportUnknownMemberType]
     workflow.add_edge(approval_queue.name, END)
 
     return workflow.compile(checkpointer=checkpointer)  # pyright: ignore[reportUnknownMemberType]

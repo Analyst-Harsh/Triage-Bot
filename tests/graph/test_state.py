@@ -110,7 +110,7 @@ def make_fully_populated_state() -> TriageState:
     )
     state["post_results"] = PostResults(
         action_results=[
-            ActionPostResult(outcome=PostOutcome.QUEUED, detail=None),
+            ActionPostResult(outcome=PostOutcome.REJECTED, detail="Too risky right now."),
         ],
         evaluated_at=datetime.now(UTC),
     )
@@ -125,7 +125,7 @@ def make_fully_populated_state() -> TriageState:
             retrieved_at=datetime.now(UTC),
         )
     ]
-    state["status"] = RunStatus.PENDING_APPROVAL
+    state["status"] = RunStatus.REJECTED
     return state
 
 

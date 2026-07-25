@@ -9,12 +9,17 @@ The project is early-stage: the state schema (`graph/schemas/`, `graph/state.py`
 
 ## Quickstart
 
+Requires the `git` CLI on `PATH` (used at runtime by `utils/diff_applier.py`'s `DiffApplier` to apply an approved code-fix diff when opening a pull request — not just a dev/CI tool here), in addition to `uv`.
+
 ```bash
 uv sync                        # install dependencies (Python 3.14, see .python-version)
 cp -n .env.example .env        # -n: won't clobber an existing .env — then fill in the values you need
 uv run lefthook install        # one-time: activate pre-commit/pre-push git hooks
 uv run pytest                  # run the test suite
+uv run python main.py          # run the replay pipeline against the demo issue
 ```
+
+`main.py` is resume-safe: if a run pauses for approval (a MEDIUM/HIGH-risk drafted action), it prompts interactively at the terminal for each queued action and posts whatever's approved. Re-running `uv run python main.py` while a prior run on the same issue is still paused resumes that pending approval instead of starting a duplicate run.
 
 ## Documentation
 

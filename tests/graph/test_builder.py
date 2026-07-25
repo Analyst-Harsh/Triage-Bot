@@ -2,9 +2,11 @@ from datetime import UTC, datetime
 
 import pytest
 from github import Github
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import NodeError
+from langgraph.types import Command
 from pydantic import SecretStr
 from structlog.testing import capture_logs
 
@@ -12,9 +14,19 @@ import graph.builder as builder_module
 from config.settings import Settings
 from graph.builder import build_graph, handle_node_error
 from graph.nodes.drafter import DrafterSubgraph
-from graph.schemas import IssuePayload, IssueSource, PostOutcome, RunStatus
+from graph.nodes.node_names import NodeName
+from graph.schemas import (
+    ActionRiskJudgment,
+    IssuePayload,
+    IssueSource,
+    PostOutcome,
+    RiskJudgmentBatch,
+    RiskLevel,
+    RunStatus,
+)
 from graph.state import create_initial_state
 from tests.graph.nodes.conftest import (
+    make_fake_approval_queue_node,
     make_fake_auto_post_node,
     make_fake_drafter_subgraph,
     make_fake_planner_node,
@@ -45,6 +57,10 @@ def test_build_graph_registers_all_six_nodes(monkeypatch: pytest.MonkeyPatch) ->
     # PlannerNode/RiskCheckNode/DrafterSubgraph/ResearcherSubgraph are faked
     # below.
     monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
+    # ApprovalQueueNode's real __init__ also resolves the process-wide
+    # GitHubClient singleton (via its own ActionExecutor) -- faked for the
+    # same hermeticity reason as AutoPostNode.
+    monkeypatch.setattr(builder_module, "ApprovalQueueNode", make_fake_approval_queue_node)
     # ResearcherSubgraph/DrafterSubgraph/RiskCheckNode's real __init__s all
     # build real OpenAI chat clients via Settings -- faked for the same
     # hermeticity reason as AutoPostNode above. `build_graph()` constructs
@@ -76,6 +92,10 @@ async def test_invoke_flows_through_all_nodes_to_auto_post(
     # and don't depend on the developer's local Settings/.env, matching how
     # PlannerNode/RiskCheckNode/DrafterSubgraph are faked below.
     monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
+    # ApprovalQueueNode's real __init__ also resolves the process-wide
+    # GitHubClient singleton (via its own ActionExecutor) -- faked for the
+    # same hermeticity reason as AutoPostNode.
+    monkeypatch.setattr(builder_module, "ApprovalQueueNode", make_fake_approval_queue_node)
     # ResearcherSubgraph's real __init__ builds a real OpenAI chat client via
     # Settings -- faked here so this test stays hermetic and doesn't depend
     # on the developer's local Settings/.env, matching AutoPostNode above.
@@ -99,14 +119,11 @@ async def test_invoke_flows_through_all_nodes_to_auto_post(
     # not ours.
     result = await graph.ainvoke(state)  # pyright: ignore[reportUnknownMemberType]
 
-    # The graph is now strictly linear: risk_check -> auto_post ->
-    # approval_queue -> END (no conditional routing). approval_queue is
-    # still a no-op stub (out of scope for this change) that unconditionally
-    # overwrites status to PENDING_APPROVAL, even though the fake
-    # RiskCheckNode reports LOW risk and auto_post's own (dry-run, since
-    # create_initial_state defaults dry_run=True) post_results show the one
-    # drafted action as POSTED.
-    assert result["status"] == RunStatus.PENDING_APPROVAL
+    # The fake RiskCheckNode reports LOW risk for the fake Drafter's single
+    # CommentAction, so `route_after_auto_post` sends this run straight to
+    # END after `auto_post` -- `approval_queue` never runs, and status is
+    # AUTO_POSTED rather than PENDING_APPROVAL.
+    assert result["status"] == RunStatus.AUTO_POSTED
     assert result["planner_output"] is not None
     assert result["research_findings"] is not None
     assert result["draft"] is not None
@@ -115,7 +132,57 @@ async def test_invoke_flows_through_all_nodes_to_auto_post(
     post_results = result["post_results"]
     assert post_results is not None
     assert [r.outcome for r in post_results.action_results] == [PostOutcome.POSTED]
-    assert result["run_meta"].iteration_count == 6
+    assert result["run_meta"].iteration_count == 5
+
+
+async def test_invoke_pauses_at_approval_queue_and_resumes_after_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(builder_module, "PlannerNode", make_fake_planner_node)
+    monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
+    monkeypatch.setattr(builder_module, "ApprovalQueueNode", make_fake_approval_queue_node)
+    monkeypatch.setattr(builder_module, "ResearcherSubgraph", make_fake_researcher_subgraph)
+    monkeypatch.setattr(builder_module, "DrafterSubgraph", make_fake_drafter_subgraph)
+    # The fake Drafter's single CommentAction is judged MEDIUM here (instead
+    # of the default LOW), so `auto_post` leaves it QUEUED and
+    # `route_after_auto_post` sends the run into `approval_queue`.
+    monkeypatch.setattr(
+        builder_module,
+        "RiskCheckNode",
+        lambda: make_fake_risk_check_node(
+            parsed_result=RiskJudgmentBatch(
+                judgments=[
+                    ActionRiskJudgment(
+                        action_index=0,
+                        level=RiskLevel.MEDIUM,
+                        risk_factors=[],
+                        reasoning="Test double judgment.",
+                    )
+                ]
+            )
+        ),
+    )
+    checkpointer = InMemorySaver()
+    graph = build_graph(checkpointer=checkpointer)
+    issue = make_issue()
+    state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
+    config: RunnableConfig = {"configurable": {"thread_id": state["run_meta"].thread_id}}
+
+    paused = await graph.ainvoke(state, config)  # pyright: ignore[reportUnknownMemberType]
+
+    assert paused["status"] == RunStatus.PENDING_APPROVAL
+    assert "__interrupt__" in paused
+    snapshot = await graph.aget_state(config)  # pyright: ignore[reportUnknownMemberType]
+    assert snapshot.next == (NodeName.APPROVAL_QUEUE,)
+
+    resumed = await graph.ainvoke(  # pyright: ignore[reportUnknownMemberType]
+        Command(resume={"decisions": [{"index": 0, "approved": True}]}), config
+    )
+
+    assert resumed["status"] == RunStatus.APPROVED_AND_POSTED
+    post_results = resumed["post_results"]
+    assert post_results is not None
+    assert post_results.action_results[0].outcome == PostOutcome.POSTED
 
 
 def test_build_graph_threads_checkpointer_through_compile(
@@ -127,6 +194,10 @@ def test_build_graph_threads_checkpointer_through_compile(
     # and don't depend on the developer's local Settings/.env, matching how
     # PlannerNode/RiskCheckNode/DrafterSubgraph are faked below.
     monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
+    # ApprovalQueueNode's real __init__ also resolves the process-wide
+    # GitHubClient singleton (via its own ActionExecutor) -- faked for the
+    # same hermeticity reason as AutoPostNode.
+    monkeypatch.setattr(builder_module, "ApprovalQueueNode", make_fake_approval_queue_node)
     # ResearcherSubgraph/DrafterSubgraph/RiskCheckNode's real __init__s all
     # build real OpenAI chat clients via Settings -- faked here for the same
     # hermeticity reason as AutoPostNode above; `build_graph()` constructs
@@ -151,6 +222,10 @@ def test_build_graph_threads_sandbox_handle_into_drafter_subgraph(
     # and don't depend on the developer's local Settings/.env, matching how
     # PlannerNode/RiskCheckNode/DrafterSubgraph are faked below.
     monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
+    # ApprovalQueueNode's real __init__ also resolves the process-wide
+    # GitHubClient singleton (via its own ActionExecutor) -- faked for the
+    # same hermeticity reason as AutoPostNode.
+    monkeypatch.setattr(builder_module, "ApprovalQueueNode", make_fake_approval_queue_node)
     # ResearcherSubgraph's real __init__ builds a real OpenAI chat client via
     # Settings -- faked here so this test stays hermetic and doesn't depend
     # on the developer's local Settings/.env, matching AutoPostNode above.
