@@ -1,5 +1,6 @@
 from typing import ClassVar
 
+import pytest
 import structlog
 from langchain.agents.middleware import (
     ClearToolUsesEdit,
@@ -77,6 +78,8 @@ def make_loop_state(
     messages: list[BaseMessage] | None = None,
     summary: _StubSummary | None = None,
     summarize_cost: float = 0.0,
+    summarize_cache_read_tokens: int = 0,
+    summarize_cache_creation_tokens: int = 0,
 ) -> AgentLoopState:
     return AgentLoopState(
         issue=triage_state["issue"],
@@ -91,6 +94,8 @@ def make_loop_state(
         messages=messages or [],
         summary=summary,
         summarize_cost=summarize_cost,
+        summarize_cache_read_tokens=summarize_cache_read_tokens,
+        summarize_cache_creation_tokens=summarize_cache_creation_tokens,
     )
 
 
@@ -148,6 +153,63 @@ async def test_assemble_node_bumps_iteration_count_and_tool_calls_made(
     assert run_meta is not None
     assert run_meta.iteration_count == triage_state["run_meta"].iteration_count + 1
     assert run_meta.tool_calls_made == triage_state["run_meta"].tool_calls_made
+
+
+async def test_assemble_node_accumulates_cache_tokens_from_trajectory_and_summarize(
+    triage_state: TriageState,
+) -> None:
+    node = make_node()
+    messages: list[BaseMessage] = [
+        AIMessage(
+            content="",
+            usage_metadata={
+                "input_tokens": 2000,
+                "output_tokens": 50,
+                "total_tokens": 2050,
+                "input_token_details": {"cache_read": 1500, "cache_creation": 10},
+            },
+            response_metadata={"model_name": "gpt-4o-mini"},
+        )
+    ]
+    state = make_loop_state(
+        triage_state,
+        summary=_StubSummary(note="x"),
+        messages=messages,
+        summarize_cache_read_tokens=100,
+        summarize_cache_creation_tokens=5,
+    )
+
+    update = await node.assemble_node(state)
+
+    run_meta = update.get("run_meta")
+    assert run_meta is not None
+    assert run_meta.cache_read_tokens == triage_state["run_meta"].cache_read_tokens + 1600
+    assert run_meta.cache_creation_tokens == triage_state["run_meta"].cache_creation_tokens + 15
+
+
+async def test_assemble_node_logs_cache_token_totals(triage_state: TriageState) -> None:
+    node = make_node()
+    messages: list[BaseMessage] = [
+        AIMessage(
+            content="",
+            usage_metadata={
+                "input_tokens": 2000,
+                "output_tokens": 50,
+                "total_tokens": 2050,
+                "input_token_details": {"cache_read": 1500, "cache_creation": 0},
+            },
+            response_metadata={"model_name": "gpt-4o-mini"},
+        )
+    ]
+    state = make_loop_state(triage_state, summary=_StubSummary(note="x"), messages=messages)
+
+    with capture_logs(processors=[structlog.contextvars.merge_contextvars]) as cap_logs:
+        await node.assemble_node(state)
+
+    finished = next(entry for entry in cap_logs if entry["event"] == "agent_subgraph_finished")
+    assert finished["cache_read_tokens"] == 1500
+    assert finished["cache_creation_tokens"] == 0
+    assert finished["trajectory_cache_hit_ratio"] == pytest.approx(1500 / 2000)
 
 
 async def test_assemble_node_logs_cap_hit_when_at_or_over_limit(triage_state: TriageState) -> None:

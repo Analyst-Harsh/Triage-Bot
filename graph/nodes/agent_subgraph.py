@@ -21,7 +21,7 @@ from graph.nodes.node_names import NodeName
 from graph.nodes.trajectory import (
     clamp_trajectory_for_model_call,
     derive_tool_call_records,
-    estimate_trajectory_cost,
+    estimate_trajectory_usage,
     resolve_dangling_tool_calls,
 )
 from graph.schemas import ToolCallRecord
@@ -50,6 +50,8 @@ class AgentLoopState(TriageState):
     messages: Annotated[list[BaseMessage], add_messages]
     summary: BaseModel | None
     summarize_cost: float
+    summarize_cache_read_tokens: int
+    summarize_cache_creation_tokens: int
 
 
 class _LoopUpdate(TypedDict, total=False):
@@ -59,6 +61,8 @@ class _LoopUpdate(TypedDict, total=False):
     messages: list[BaseMessage]
     summary: BaseModel | None
     summarize_cost: float
+    summarize_cache_read_tokens: int
+    summarize_cache_creation_tokens: int
 
 
 class AgentSubgraph[SummaryT: BaseModel](ABC):
@@ -278,13 +282,20 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         result = await call_structured(
             self._primary_model, self._fallback_model, clamped_messages, self.summary_schema
         )
-        return _LoopUpdate(summary=result.parsed, summarize_cost=result.estimated_cost_usd)
+        return _LoopUpdate(
+            summary=result.parsed,
+            summarize_cost=result.estimated_cost_usd,
+            summarize_cache_read_tokens=result.cache_read_tokens,
+            summarize_cache_creation_tokens=result.cache_creation_tokens,
+        )
 
     async def assemble_node(self, state: AgentLoopState) -> TriageStateUpdate:
         messages = resolve_dangling_tool_calls(state["messages"])
         tool_calls = derive_tool_call_records(messages)
-        trajectory_cost = estimate_trajectory_cost(messages)
+        trajectory = estimate_trajectory_usage(messages)
         summarize_cost = state.get("summarize_cost", 0.0)
+        summarize_cache_read_tokens = state.get("summarize_cache_read_tokens", 0)
+        summarize_cache_creation_tokens = state.get("summarize_cache_creation_tokens", 0)
         # Set by summarize_node with `self.summary_schema`, so this is
         # always either None (short-circuit path) or a SummaryT instance —
         # a cast, not a runtime check, since pydantic already validated it
@@ -295,17 +306,35 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
 
         run_meta = update.get("run_meta", state["run_meta"])
         cap_hit = len(tool_calls) >= self.max_tool_calls
+        total_cache_read_tokens = trajectory.cache_read_tokens + summarize_cache_read_tokens
+        total_cache_creation_tokens = (
+            trajectory.cache_creation_tokens + summarize_cache_creation_tokens
+        )
         update["run_meta"] = run_meta.with_usage(
-            cost_usd=trajectory_cost + summarize_cost,
+            cost_usd=trajectory.cost_usd + summarize_cost,
             tool_calls=len(tool_calls),
             iterations=1,
+            cache_read_tokens=total_cache_read_tokens,
+            cache_creation_tokens=total_cache_creation_tokens,
+        )
+        # Ratio over the trajectory's own tokens only -- the dominant volume
+        # in a multi-turn tool loop -- not a whole-node figure (the
+        # post-loop summarize call isn't folded in), hence the `trajectory_`
+        # prefix rather than a bare `cache_hit_ratio`.
+        trajectory_cache_hit_ratio = (
+            trajectory.cache_read_tokens / trajectory.total_input_tokens
+            if trajectory.total_input_tokens
+            else 0.0
         )
         log.info(
             "agent_subgraph_finished",
             node=self.name,
             tool_call_count=len(tool_calls),
             tools_used=sorted({call.tool_name for call in tool_calls}),
-            cost_usd=trajectory_cost + summarize_cost,
+            cost_usd=trajectory.cost_usd + summarize_cost,
+            cache_read_tokens=total_cache_read_tokens,
+            cache_creation_tokens=total_cache_creation_tokens,
+            trajectory_cache_hit_ratio=trajectory_cache_hit_ratio,
             cap_hit=cap_hit,
         )
         return update

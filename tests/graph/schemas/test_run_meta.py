@@ -23,6 +23,8 @@ def test_construction_with_defaults() -> None:
     assert meta.iteration_count == 0
     assert meta.tool_calls_made == 0
     assert meta.estimated_cost_usd == 0.0
+    assert meta.cache_read_tokens == 0
+    assert meta.cache_creation_tokens == 0
     assert meta.errors == []
     assert meta.dry_run is True
 
@@ -65,8 +67,46 @@ def test_with_usage_accumulates_cost_tool_calls_and_iterations() -> None:
 
 
 def test_with_usage_defaults_to_no_change() -> None:
-    meta = make_run_meta(estimated_cost_usd=2.0, tool_calls_made=1, iteration_count=1)
+    meta = make_run_meta(
+        estimated_cost_usd=2.0,
+        tool_calls_made=1,
+        iteration_count=1,
+        cache_read_tokens=10,
+        cache_creation_tokens=2,
+    )
 
     updated = meta.with_usage()
 
     assert updated == meta
+    assert updated.cache_read_tokens == 10
+    assert updated.cache_creation_tokens == 2
+
+
+def test_with_usage_accumulates_cache_tokens() -> None:
+    meta = make_run_meta(cache_read_tokens=100, cache_creation_tokens=10)
+
+    updated = meta.with_usage(cache_read_tokens=50, cache_creation_tokens=5)
+
+    assert updated.cache_read_tokens == 150
+    assert updated.cache_creation_tokens == 15
+    # Original is untouched (model_copy semantics).
+    assert meta.cache_read_tokens == 100
+
+
+def test_json_round_trip_with_cache_tokens() -> None:
+    meta = make_run_meta(cache_read_tokens=7, cache_creation_tokens=3)
+    restored = RunMeta.model_validate_json(meta.model_dump_json())
+    assert restored == meta
+
+
+def test_deserializes_without_cache_fields_for_backward_compatibility() -> None:
+    """An old checkpoint written before cache_read_tokens/cache_creation_tokens
+    existed must still deserialize -- both fields default to 0."""
+    payload = make_run_meta().model_dump(mode="json")
+    del payload["cache_read_tokens"]
+    del payload["cache_creation_tokens"]
+
+    restored = RunMeta.model_validate(payload)
+
+    assert restored.cache_read_tokens == 0
+    assert restored.cache_creation_tokens == 0

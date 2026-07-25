@@ -5,6 +5,7 @@ from unittest.mock import create_autospec
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages.ai import UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_core.tools import BaseTool
@@ -125,6 +126,8 @@ def make_fake_chat_model(
     model_name: str = "fake-model",
     input_tokens: int = 10,
     output_tokens: int = 5,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
     parsed_result: Any = None,
     parsed_results_by_schema: dict[type, Any] | None = None,
     raise_on_generate: bool = False,
@@ -132,14 +135,22 @@ def make_fake_chat_model(
     fail_parse_times: int = 0,
     raise_validation_error_times: int = 0,
 ) -> FakeStructuredChatModel:
+    usage_metadata: UsageMetadata = {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
+    # Only set when nonzero -- matches a real, non-cached provider response,
+    # which omits `input_token_details` entirely rather than sending zeros.
+    if cache_read_tokens or cache_creation_tokens:
+        usage_metadata["input_token_details"] = {
+            "cache_read": cache_read_tokens,
+            "cache_creation": cache_creation_tokens,
+        }
     return FakeStructuredChatModel(
         response=AIMessage(
             content="",
-            usage_metadata={
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "total_tokens": input_tokens + output_tokens,
-            },
+            usage_metadata=usage_metadata,
             response_metadata={"model_name": model_name},
         ),
         parsed_result=parsed_result,

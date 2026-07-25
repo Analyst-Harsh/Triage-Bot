@@ -269,6 +269,8 @@ async def test_researcher_subgraph_end_to_end_produces_findings() -> None:
         messages=[],
         summary=None,
         summarize_cost=0.0,
+        summarize_cache_read_tokens=0,
+        summarize_cache_creation_tokens=0,
     )
 
     result = await graph.ainvoke(state)  # pyright: ignore[reportUnknownMemberType]

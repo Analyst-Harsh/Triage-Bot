@@ -16,7 +16,11 @@ from graph.schemas import (
     SandboxResult,
 )
 from graph.state import TriageState
-from tests.graph.nodes.conftest import make_fake_risk_check_node
+from tests.graph.nodes.conftest import (
+    _FakeRiskCheckNode,  # pyright: ignore[reportPrivateUsage]
+    make_fake_chat_model,
+    make_fake_risk_check_node,
+)
 
 
 def _draft(
@@ -124,6 +128,33 @@ async def test_execute_judges_comment_via_llm(triage_state: TriageState) -> None
     run_meta = update["run_meta"]
     assert run_meta is not None
     assert run_meta.estimated_cost_usd > triage_state["run_meta"].estimated_cost_usd
+
+
+async def test_execute_threads_cache_tokens_into_run_meta(triage_state: TriageState) -> None:
+    triage_state["draft"] = _draft([_comment_action()])
+    parsed_result = RiskJudgmentBatch(
+        judgments=[
+            ActionRiskJudgment(
+                action_index=0, level=RiskLevel.LOW, risk_factors=[], reasoning="Routine."
+            )
+        ]
+    )
+    primary = make_fake_chat_model(
+        model_name="gpt-4o-mini",
+        parsed_result=parsed_result,
+        cache_read_tokens=300,
+        cache_creation_tokens=20,
+    )
+    fallback = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
+    node = _FakeRiskCheckNode(primary, fallback)
+
+    update = await node.execute(triage_state)
+
+    assert "run_meta" in update
+    run_meta = update["run_meta"]
+    assert run_meta is not None
+    assert run_meta.cache_read_tokens == triage_state["run_meta"].cache_read_tokens + 300
+    assert run_meta.cache_creation_tokens == triage_state["run_meta"].cache_creation_tokens + 20
 
 
 async def test_unsupported_claims_bump_llm_verdict_to_at_least_medium(

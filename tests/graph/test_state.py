@@ -129,6 +129,9 @@ def make_fully_populated_state() -> TriageState:
         )
     ]
     state["status"] = RunStatus.REJECTED
+    state["run_meta"] = state["run_meta"].with_usage(
+        cost_usd=0.02, cache_read_tokens=1200, cache_creation_tokens=0
+    )
     return state
 
 
@@ -149,6 +152,8 @@ def test_create_initial_state_defaults() -> None:
     assert state["run_meta"].max_cost_usd == 1.0
     assert state["run_meta"].iteration_count == 0
     assert state["run_meta"].dry_run is True
+    assert state["run_meta"].cache_read_tokens == 0
+    assert state["run_meta"].cache_creation_tokens == 0
 
 
 def test_checkpoint_serde_round_trip_on_initial_state() -> None:
