@@ -12,3 +12,5 @@ class LLMResult[T]:
     total_output_tokens: int
     estimated_cost_usd: float
     models_invoked: list[str]
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0

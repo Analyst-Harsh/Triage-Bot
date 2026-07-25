@@ -220,7 +220,9 @@ class DrafterSubgraph(AgentSubgraph[DraftProposal]):
         # draft-generation cost and the iteration bump on top of whatever
         # run_meta this method returns.
         updated_run_meta = state["run_meta"].with_usage(
-            cost_usd=critique_result.estimated_cost_usd + sandbox_cost
+            cost_usd=critique_result.estimated_cost_usd + sandbox_cost,
+            cache_read_tokens=critique_result.cache_read_tokens,
+            cache_creation_tokens=critique_result.cache_creation_tokens,
         )
         return TriageStateUpdate(draft=draft, status=RunStatus.DRAFTING, run_meta=updated_run_meta)
 

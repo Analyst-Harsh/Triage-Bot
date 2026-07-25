@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import cast
 
 from langchain.agents.middleware import ClearToolUsesEdit
@@ -132,19 +133,50 @@ def clamp_trajectory_for_model_call(
     return cast(list[BaseMessage], edited)
 
 
-def estimate_trajectory_cost(messages: Sequence[BaseMessage]) -> float:
-    """Sums the cost of every model call in a trajectory, reading each
-    `AIMessage`'s own `usage_metadata` (populated by the provider on the raw
-    API response) rather than requiring a callback — the trajectory is
-    inspected after the fact, once the loop has already finished."""
-    total = 0.0
+@dataclass
+class TrajectoryUsage:
+    """Aggregate cost/token totals over a tool-calling trajectory's model
+    calls. Internal-only — never crosses a serialization boundary, same
+    rationale as `llm.result.LLMResult`."""
+
+    cost_usd: float
+    total_input_tokens: int
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+
+
+def estimate_trajectory_usage(messages: Sequence[BaseMessage]) -> TrajectoryUsage:
+    """Sums cost and cache-token totals across every model call in a
+    trajectory, reading each `AIMessage`'s own `usage_metadata` (populated by
+    the provider on the raw API response) rather than requiring a callback —
+    the trajectory is inspected after the fact, once the loop has already
+    finished. One pass over `messages`, same as the single-value
+    `estimate_trajectory_cost` this replaces."""
+    total_cost = 0.0
+    total_input_tokens = 0
+    total_cache_read = 0
+    total_cache_creation = 0
     for msg in messages:
         if not isinstance(msg, AIMessage) or not msg.usage_metadata:
             continue
         model_name = str(msg.response_metadata.get("model_name", ""))
-        total += estimate_cost_usd(
-            model_name,
-            msg.usage_metadata["input_tokens"],
-            msg.usage_metadata["output_tokens"],
+        input_tokens = msg.usage_metadata["input_tokens"]
+        cache_read = msg.usage_metadata.get("input_token_details", {}).get("cache_read", 0) or 0
+        cache_creation = (
+            msg.usage_metadata.get("input_token_details", {}).get("cache_creation", 0) or 0
         )
-    return total
+        total_cost += estimate_cost_usd(
+            model_name,
+            input_tokens,
+            msg.usage_metadata["output_tokens"],
+            cache_read_tokens=cache_read,
+        )
+        total_input_tokens += input_tokens
+        total_cache_read += cache_read
+        total_cache_creation += cache_creation
+    return TrajectoryUsage(
+        cost_usd=total_cost,
+        total_input_tokens=total_input_tokens,
+        cache_read_tokens=total_cache_read,
+        cache_creation_tokens=total_cache_creation,
+    )

@@ -120,6 +120,31 @@ async def test_call_bumps_iteration_count(triage_state: TriageState) -> None:
     assert run_meta.iteration_count == 1
 
 
+async def test_execute_threads_cache_tokens_into_run_meta(triage_state: TriageState) -> None:
+    classification = PlannerClassification(
+        issue_type=IssueType.BUG,
+        classification_confidence=0.9,
+        investigation_plan=[],
+        reasoning="Reasoning.",
+    )
+    primary = make_fake_chat_model(
+        model_name="gpt-4o-mini",
+        parsed_result=classification,
+        cache_read_tokens=800,
+        cache_creation_tokens=50,
+    )
+    fallback = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
+    node = _FakePlannerNode(primary, fallback)
+
+    update = await node.execute(triage_state)
+
+    assert "run_meta" in update
+    run_meta = update["run_meta"]
+    assert run_meta is not None
+    assert run_meta.cache_read_tokens == triage_state["run_meta"].cache_read_tokens + 800
+    assert run_meta.cache_creation_tokens == triage_state["run_meta"].cache_creation_tokens + 50
+
+
 async def test_execute_includes_episodic_hits_in_prompt(triage_state: TriageState) -> None:
     hit = make_hit(summary="Similar startup crash last month, fix was rejected as too risky.")
     memory_store = make_memory_store_stub([hit])

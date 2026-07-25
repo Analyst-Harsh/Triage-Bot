@@ -44,6 +44,11 @@ class PlannerNode(LLMNode):
         result = await self.call_structured(messages, PlannerClassification)
         output = PlannerOutput(**result.parsed.model_dump(), classified_at=datetime.now(UTC))
 
+        cache_hit_ratio = (
+            result.cache_read_tokens / result.total_input_tokens
+            if result.total_input_tokens
+            else 0.0
+        )
         log.info(
             "planner_classified",
             issue_number=issue.issue_number,
@@ -53,11 +58,18 @@ class PlannerNode(LLMNode):
             reasoning=output.reasoning,
             classified_at=output.classified_at.isoformat(),
             estimated_cost_usd=result.estimated_cost_usd,
+            cache_read_tokens=result.cache_read_tokens,
+            cache_creation_tokens=result.cache_creation_tokens,
+            cache_hit_ratio=cache_hit_ratio,
             episodic_hits=len(hits),
         )
         return TriageStateUpdate(
             planner_output=output,
             episodic_context=hits,
             status=RunStatus.PLANNING,
-            run_meta=state["run_meta"].with_usage(cost_usd=result.estimated_cost_usd),
+            run_meta=state["run_meta"].with_usage(
+                cost_usd=result.estimated_cost_usd,
+                cache_read_tokens=result.cache_read_tokens,
+                cache_creation_tokens=result.cache_creation_tokens,
+            ),
         )

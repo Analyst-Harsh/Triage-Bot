@@ -67,6 +67,33 @@ async def test_call_structured_falls_back_after_primary_exhausts_retries() -> No
     assert len(primary.received_messages) == 2
 
 
+async def test_call_structured_sums_cache_tokens_across_primary_and_fallback() -> None:
+    """Primary's own genuinely-incurred usage (cache tokens included) must
+    still count even though only fallback's parse ultimately succeeded --
+    same rationale as test_call_structured_falls_back_after_primary_exhausts_retries.
+    `fail_parse=True` means primary's `_generate` runs (and its fixed usage
+    is counted) on each of `_STRUCTURED_OUTPUT_MAX_ATTEMPTS` (2) attempts
+    before the fallback is tried, so primary's cache tokens are counted
+    twice here -- 2*100 + 40 = 240, 2*10 + 5 = 25."""
+    primary = make_fake_chat_model(
+        model_name="primary-model",
+        fail_parse=True,
+        cache_read_tokens=100,
+        cache_creation_tokens=10,
+    )
+    fallback = make_fake_chat_model(
+        model_name="fallback-model",
+        parsed_result=_Answer(value="from fallback"),
+        cache_read_tokens=40,
+        cache_creation_tokens=5,
+    )
+
+    result = await call_structured(primary, fallback, [], _Answer)
+
+    assert result.cache_read_tokens == 240
+    assert result.cache_creation_tokens == 25
+
+
 async def test_call_structured_repairs_after_a_validation_error() -> None:
     """A genuine pydantic.ValidationError (not just any exception) should get
     the validation error fed back to the model as a corrective follow-up

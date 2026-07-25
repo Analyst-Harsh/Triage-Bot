@@ -241,6 +241,28 @@ async def test_finalize_adds_grounding_cost_without_bumping_iteration_count() ->
     assert run_meta.iteration_count == state["run_meta"].iteration_count
 
 
+async def test_finalize_threads_grounding_check_cache_tokens_into_run_meta() -> None:
+    primary = make_fake_chat_model(
+        model_name="gpt-4o-mini",
+        parsed_results_by_schema={
+            DraftProposal: make_proposal(),
+            GroundingCritique: GroundingCritique(),
+        },
+        cache_read_tokens=300,
+        cache_creation_tokens=20,
+    )
+    fallback = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
+    node = _FakeDrafterSubgraph(primary, fallback)
+    state = make_state(make_planner_output(), make_research_findings())
+
+    update = await node.finalize(make_proposal(), [], state)
+
+    run_meta = update.get("run_meta")
+    assert run_meta is not None
+    assert run_meta.cache_read_tokens == state["run_meta"].cache_read_tokens + 300
+    assert run_meta.cache_creation_tokens == state["run_meta"].cache_creation_tokens + 20
+
+
 async def test_finalize_skips_grounding_check_for_label_only_draft() -> None:
     """Regression test for the bug where a label-only draft's rationale got
     flagged as "unsupported claims": with no public-facing text at all,
@@ -663,6 +685,8 @@ async def test_drafter_subgraph_end_to_end_produces_grounded_draft() -> None:
         messages=[],
         summary=None,
         summarize_cost=0.0,
+        summarize_cache_read_tokens=0,
+        summarize_cache_creation_tokens=0,
     )
 
     result = await graph.ainvoke(state)  # pyright: ignore[reportUnknownMemberType]
@@ -722,6 +746,8 @@ async def test_drafter_subgraph_end_to_end_produces_grounded_code_fix_draft() ->
         messages=[],
         summary=None,
         summarize_cost=0.0,
+        summarize_cache_read_tokens=0,
+        summarize_cache_creation_tokens=0,
     )
 
     result = await graph.ainvoke(state)  # pyright: ignore[reportUnknownMemberType]

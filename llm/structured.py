@@ -5,6 +5,7 @@ import structlog
 from langchain_core.callbacks.usage import get_usage_metadata_callback
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages.ai import UsageMetadata
 from langchain_core.runnables import Runnable
 from pydantic import ValidationError
 
@@ -140,8 +141,21 @@ async def call_structured[T](
             )
     total_in = sum(usage["input_tokens"] for usage in cb.usage_metadata.values())
     total_out = sum(usage["output_tokens"] for usage in cb.usage_metadata.values())
+    total_cache_read = sum(_cache_read_tokens(usage) for usage in cb.usage_metadata.values())
+    total_cache_creation = sum(
+        _cache_creation_tokens(usage) for usage in cb.usage_metadata.values()
+    )
+    # Discount is priced per-model (each model in models_invoked has its own
+    # cache_read_input_token_cost) -- must be applied inside this
+    # per-model comprehension, never by summing cache_read tokens globally
+    # first and calling estimate_cost_usd once against a mixed total.
     cost = sum(
-        estimate_cost_usd(model_name, usage["input_tokens"], usage["output_tokens"])
+        estimate_cost_usd(
+            model_name,
+            usage["input_tokens"],
+            usage["output_tokens"],
+            cache_read_tokens=_cache_read_tokens(usage),
+        )
         for model_name, usage in cb.usage_metadata.items()
     )
     return LLMResult(
@@ -150,4 +164,14 @@ async def call_structured[T](
         total_output_tokens=total_out,
         estimated_cost_usd=cost,
         models_invoked=list(cb.usage_metadata.keys()),
+        cache_read_tokens=total_cache_read,
+        cache_creation_tokens=total_cache_creation,
     )
+
+
+def _cache_read_tokens(usage: UsageMetadata) -> int:
+    return usage.get("input_token_details", {}).get("cache_read", 0) or 0
+
+
+def _cache_creation_tokens(usage: UsageMetadata) -> int:
+    return usage.get("input_token_details", {}).get("cache_creation", 0) or 0

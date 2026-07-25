@@ -3,7 +3,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from graph.nodes.trajectory import (
     clamp_trajectory_for_model_call,
     derive_tool_call_records,
-    estimate_trajectory_cost,
+    estimate_trajectory_usage,
     missing_tool_results,
     resolve_dangling_tool_calls,
 )
@@ -166,7 +166,7 @@ def test_resolve_dangling_tool_calls_inserts_immediately_after_owning_ai_message
     assert resolved[3] is final
 
 
-def test_estimate_trajectory_cost_sums_ai_message_usage() -> None:
+def test_estimate_trajectory_usage_sums_ai_message_usage() -> None:
     messages = [
         AIMessage(
             content="",
@@ -180,20 +180,22 @@ def test_estimate_trajectory_cost_sums_ai_message_usage() -> None:
         ),
     ]
 
-    cost = estimate_trajectory_cost(messages)
+    usage = estimate_trajectory_usage(messages)
 
-    assert cost > 0.0
+    assert usage.cost_usd > 0.0
+    assert usage.total_input_tokens == 1200
 
 
-def test_estimate_trajectory_cost_ignores_messages_without_usage_metadata() -> None:
+def test_estimate_trajectory_usage_ignores_messages_without_usage_metadata() -> None:
     messages = [HumanMessage(content="hi"), AIMessage(content="no usage data here")]
 
-    cost = estimate_trajectory_cost(messages)
+    usage = estimate_trajectory_usage(messages)
 
-    assert cost == 0.0
+    assert usage.cost_usd == 0.0
+    assert usage.total_input_tokens == 0
 
 
-def test_estimate_trajectory_cost_unmapped_model_contributes_zero() -> None:
+def test_estimate_trajectory_usage_unmapped_model_contributes_zero() -> None:
     messages = [
         AIMessage(
             content="",
@@ -202,9 +204,55 @@ def test_estimate_trajectory_cost_unmapped_model_contributes_zero() -> None:
         )
     ]
 
-    cost = estimate_trajectory_cost(messages)
+    usage = estimate_trajectory_usage(messages)
 
-    assert cost == 0.0
+    assert usage.cost_usd == 0.0
+
+
+def test_estimate_trajectory_usage_sums_cache_tokens_across_messages() -> None:
+    messages = [
+        AIMessage(
+            content="",
+            usage_metadata={
+                "input_tokens": 2000,
+                "output_tokens": 100,
+                "total_tokens": 2100,
+                "input_token_details": {"cache_read": 1500, "cache_creation": 0},
+            },
+            response_metadata={"model_name": "gpt-5-nano"},
+        ),
+        AIMessage(
+            content="",
+            usage_metadata={
+                "input_tokens": 2200,
+                "output_tokens": 80,
+                "total_tokens": 2280,
+                "input_token_details": {"cache_read": 2000, "cache_creation": 0},
+            },
+            response_metadata={"model_name": "gpt-5-nano"},
+        ),
+    ]
+
+    usage = estimate_trajectory_usage(messages)
+
+    assert usage.total_input_tokens == 4200
+    assert usage.cache_read_tokens == 3500
+    assert usage.cache_creation_tokens == 0
+
+
+def test_estimate_trajectory_usage_defaults_cache_fields_to_zero_when_absent() -> None:
+    messages = [
+        AIMessage(
+            content="",
+            usage_metadata={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+            response_metadata={"model_name": "gpt-4o-mini"},
+        )
+    ]
+
+    usage = estimate_trajectory_usage(messages)
+
+    assert usage.cache_read_tokens == 0
+    assert usage.cache_creation_tokens == 0
 
 
 def make_tool_call_pair(index: int, content: str) -> list[AIMessage | ToolMessage]:

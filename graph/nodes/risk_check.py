@@ -69,12 +69,16 @@ class RiskCheckNode(LLMNode):
                     judged_indices.append(index)
 
         cost_usd = 0.0
+        cache_read_tokens = 0
+        cache_creation_tokens = 0
         if judged_indices:
             messages = build_risk_judgment_messages(
                 draft, state["research_findings"], judged_indices
             )
             result = await self.call_structured(messages, RiskJudgmentBatch)
             cost_usd = result.estimated_cost_usd
+            cache_read_tokens = result.cache_read_tokens
+            cache_creation_tokens = result.cache_creation_tokens
 
             judgments_by_index = {j.action_index: j for j in result.parsed.judgments}
             floor = RiskLevel.MEDIUM if draft.unsupported_claims else RiskLevel.LOW
@@ -101,12 +105,18 @@ class RiskCheckNode(LLMNode):
             levels=[a.level.value for a in risk_assessment.action_assessments],
             llm_judged_count=len(judged_indices),
             estimated_cost_usd=cost_usd,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
         )
 
         update: TriageStateUpdate = {
             "risk_assessment": risk_assessment,
             "status": RunStatus.RISK_CHECK,
         }
-        if cost_usd > 0.0:
-            update["run_meta"] = state["run_meta"].with_usage(cost_usd=cost_usd)
+        if cost_usd > 0.0 or cache_read_tokens > 0 or cache_creation_tokens > 0:
+            update["run_meta"] = state["run_meta"].with_usage(
+                cost_usd=cost_usd,
+                cache_read_tokens=cache_read_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+            )
         return update
