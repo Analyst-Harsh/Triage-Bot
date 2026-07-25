@@ -64,11 +64,12 @@ uv run lefthook run pre-push     # run the pre-push hook set manually against th
 ## Engineering standards (condensed — full rationale: `docs/agent/engineering-standards.md`)
 
 - Design patterns over raw/ad-hoc code — discriminated unions for polymorphic data, typed contracts at every boundary, factory functions for non-trivial construction, one model per file.
+- Prefer classes over standalone functions — a single self-contained utility function is fine on its own, but as soon as a second related function shows up (shared responsibility, shared state/config, or naturally called together), group them onto a class instead of letting free functions accumulate (see `docs/agent/engineering-standards.md`).
 - Validate at boundaries (Pydantic), trust internals — don't re-validate already-validated data deeper in business logic.
 - Type-complete by default — every function has a real return type; strict `pyright` is the bar.
 - Tests are part of the definition of done, not a follow-up task.
 - No silent shortcuts — no "TODO: fix later," no swallowed exceptions, no disabled lint/type rules without an inline reason.
-- No test-only constructor parameters — a class's constructor is shaped by production needs; tests substitute behavior via the `_Fake<Name>` subclass pattern (`tests/graph/nodes/conftest.py`, `tests/api/test_github_client.py`).
+- No test-only constructor parameters — a class's constructor is shaped by production needs; tests substitute behavior via the `_Fake<Name>` subclass pattern (`tests/graph/nodes/conftest.py`, `tests/utils/test_github_client.py`).
 - When there's more than one way to build something, pick the one a senior engineer shipping this to production would pick — and say why if it's a nontrivial call.
 
 ## Architecture (condensed — full detail: `docs/agent/architecture-conventions.md`, full vision: `docs/summary.md`)

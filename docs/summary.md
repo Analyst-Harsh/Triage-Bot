@@ -14,7 +14,7 @@ Planner — reads the raw issue and figures out: what kind of issue is this, and
 Researcher — actually goes and checks: searches your codebase, pulls from indexed docs (via DocMind, your first project), searches the web if needed.
 Drafter — writes the actual response. For issues that look like simple, well-scoped bugs, it goes a step further: reproduces the bug in an isolated sandbox and tests a real code fix.
 Risk check — decides how much trust this action deserves.
-Auto-post or Approval queue — low-risk actions (like a label or a clarifying comment) go out immediately. Anything riskier — especially a proposed code fix — waits in a queue for you to approve or reject.
+Auto-post or Approval queue — low-risk actions (like a label or a clarifying comment) go out immediately. Anything riskier — especially a proposed code fix — pauses the run (via LangGraph's `interrupt()`, checkpointed so it survives a restart) and waits for you to approve or reject each one individually. A code fix you approve becomes a real pull request, built from the drafter's sandboxed diff against the exact commit it was verified against.
 
 Every outcome, either way, gets logged to episodic memory — a record the Planner checks on future issues, so TriageBot's second month of decisions is better-informed than its first day.
 What wraps around all of this (the part that makes it "production," not a demo toy)

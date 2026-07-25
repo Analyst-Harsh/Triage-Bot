@@ -1,22 +1,24 @@
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import create_autospec
+from uuid import UUID, uuid4
 
-import pytest
 from github import GithubException
 
-from api.github_client import GitHubClient
 from graph.nodes.utils.action_executor import ActionExecutor
 from graph.schemas import (
     CloseAction,
     CodeFixAction,
     CommentAction,
+    DraftedAction,
     IssuePayload,
     IssueSource,
     LabelAction,
     PostOutcome,
     SandboxResult,
 )
+from utils.diff_applier import DiffApplyError
+from utils.github_client import GitHubClient
 
 
 class _FakeActionExecutor(ActionExecutor):
@@ -48,16 +50,30 @@ def make_issue() -> IssuePayload:
     )
 
 
-def _code_fix_action() -> CodeFixAction:
-    return CodeFixAction(
-        diff="--- a/foo.py\n+++ b/foo.py\n",
-        target_files=["foo.py"],
-        sandbox_result=SandboxResult(
+def make_drafted_action(**overrides: Any) -> DraftedAction:
+    defaults: dict[str, Any] = {
+        "action": CommentAction(comment_body="Thanks!"),
+        "rationale": "Acknowledging the report.",
+    }
+    defaults.update(overrides)
+    return DraftedAction(**defaults)
+
+
+def _code_fix_action(**overrides: Any) -> CodeFixAction:
+    defaults: dict[str, Any] = {
+        "diff": "--- a/foo.py\n+++ b/foo.py\n",
+        "target_files": ["foo.py"],
+        "sandbox_result": SandboxResult(
             passed=True, logs="all green", test_command="pytest", duration_seconds=1.2
         ),
-        base_commit_sha="abc123",
-        base_ref="main",
-    )
+        "base_commit_sha": "abc123",
+        "base_ref": "main",
+    }
+    defaults.update(overrides)
+    return CodeFixAction(**defaults)
+
+
+RUN_ID: UUID = uuid4()
 
 
 async def test_comment_action_posts_and_returns_url() -> None:
@@ -65,7 +81,10 @@ async def test_comment_action_posts_and_returns_url() -> None:
     github_client.post_comment.return_value = "https://github.com/octo/repo/issues/42#c1"
 
     result = await executor.execute(
-        CommentAction(comment_body="Thanks!"), make_issue(), dry_run=False
+        make_drafted_action(action=CommentAction(comment_body="Thanks!")),
+        make_issue(),
+        dry_run=False,
+        run_id=RUN_ID,
     )
 
     assert result.outcome == PostOutcome.POSTED
@@ -77,9 +96,10 @@ async def test_label_action_applies_labels_and_returns_no_detail() -> None:
     executor, github_client = make_executor()
 
     result = await executor.execute(
-        LabelAction(labels_to_add=["bug"], labels_to_remove=["stale"]),
+        make_drafted_action(action=LabelAction(labels_to_add=["bug"], labels_to_remove=["stale"])),
         make_issue(),
         dry_run=False,
+        run_id=RUN_ID,
     )
 
     assert result.outcome == PostOutcome.POSTED
@@ -91,9 +111,12 @@ async def test_close_action_posts_comment_then_closes() -> None:
     executor, github_client = make_executor()
 
     result = await executor.execute(
-        CloseAction(reason="duplicate", close_comment="Duplicate of #10."),
+        make_drafted_action(
+            action=CloseAction(reason="duplicate", close_comment="Duplicate of #10.")
+        ),
         make_issue(),
         dry_run=False,
+        run_id=RUN_ID,
     )
 
     assert result.outcome == PostOutcome.POSTED
@@ -104,7 +127,10 @@ async def test_dry_run_returns_posted_without_calling_github() -> None:
     executor, github_client = make_executor()
 
     result = await executor.execute(
-        CommentAction(comment_body="Thanks!"), make_issue(), dry_run=True
+        make_drafted_action(action=CommentAction(comment_body="Thanks!")),
+        make_issue(),
+        dry_run=True,
+        run_id=RUN_ID,
     )
 
     assert result.outcome == PostOutcome.POSTED
@@ -117,7 +143,10 @@ async def test_github_exception_produces_failed_result_with_error_detail() -> No
     github_client.post_comment.side_effect = GithubException(500, {"message": "boom"}, None)
 
     result = await executor.execute(
-        CommentAction(comment_body="Thanks!"), make_issue(), dry_run=False
+        make_drafted_action(action=CommentAction(comment_body="Thanks!")),
+        make_issue(),
+        dry_run=False,
+        run_id=RUN_ID,
     )
 
     assert result.outcome == PostOutcome.FAILED
@@ -125,22 +154,94 @@ async def test_github_exception_produces_failed_result_with_error_detail() -> No
     assert "boom" in result.detail
 
 
-async def test_code_fix_raises_assertion_error_with_dry_run_false() -> None:
-    executor, _ = make_executor()
-
-    with pytest.raises(AssertionError):
-        await executor.execute(_code_fix_action(), make_issue(), dry_run=False)
-
-
-async def test_code_fix_raises_assertion_error_even_with_dry_run_true() -> None:
-    """The invariant guard must not be bypassable just because a run is
-    simulated -- proves the guard runs before, not after, the dry-run
-    short-circuit."""
+async def test_code_fix_dry_run_returns_posted_without_github_calls() -> None:
     executor, github_client = make_executor()
 
-    with pytest.raises(AssertionError):
-        await executor.execute(_code_fix_action(), make_issue(), dry_run=True)
+    result = await executor.execute(
+        make_drafted_action(action=_code_fix_action()),
+        make_issue(),
+        dry_run=True,
+        run_id=RUN_ID,
+    )
 
-    github_client.post_comment.assert_not_called()
-    github_client.apply_labels.assert_not_called()
-    github_client.close_issue.assert_not_called()
+    assert result.outcome == PostOutcome.POSTED
+    assert result.detail is None
+    github_client.create_pull_request_from_diff.assert_not_called()
+
+
+async def test_code_fix_creates_pr_and_returns_url_as_detail() -> None:
+    executor, github_client = make_executor()
+    github_client.create_pull_request_from_diff.return_value = "https://github.com/octo/repo/pull/7"
+    run_id = uuid4()
+    action = _code_fix_action()
+    drafted = make_drafted_action(action=action, rationale="Fixes the null check in foo.py.")
+
+    result = await executor.execute(drafted, make_issue(), dry_run=False, run_id=run_id)
+
+    assert result.outcome == PostOutcome.POSTED
+    assert result.detail == "https://github.com/octo/repo/pull/7"
+    github_client.create_pull_request_from_diff.assert_called_once()
+    _, kwargs = github_client.create_pull_request_from_diff.call_args
+    assert kwargs["diff"] == action.diff
+    assert kwargs["target_files"] == action.target_files
+    assert kwargs["base_commit_sha"] == action.base_commit_sha
+    assert kwargs["base_branch"] == action.base_ref
+    assert kwargs["branch_name"] == f"triage-bot/issue-42-{run_id.hex[:8]}"
+    assert "#42" in kwargs["title"]
+    assert "Fixes the null check in foo.py." in kwargs["body"]
+    assert "pytest" in kwargs["body"]
+    assert "passed" in kwargs["body"]
+    assert action.base_commit_sha in kwargs["body"]
+
+
+async def test_code_fix_github_exception_produces_failed_result() -> None:
+    executor, github_client = make_executor()
+    github_client.create_pull_request_from_diff.side_effect = GithubException(
+        422, {"message": "Reference already exists"}, None
+    )
+
+    result = await executor.execute(
+        make_drafted_action(action=_code_fix_action()),
+        make_issue(),
+        dry_run=False,
+        run_id=RUN_ID,
+    )
+
+    assert result.outcome == PostOutcome.FAILED
+    assert result.detail is not None
+    assert "Reference already exists" in result.detail
+
+
+async def test_code_fix_diff_apply_error_produces_failed_result() -> None:
+    executor, github_client = make_executor()
+    github_client.create_pull_request_from_diff.side_effect = DiffApplyError(
+        "diff failed to apply: context mismatch"
+    )
+
+    result = await executor.execute(
+        make_drafted_action(action=_code_fix_action()),
+        make_issue(),
+        dry_run=False,
+        run_id=RUN_ID,
+    )
+
+    assert result.outcome == PostOutcome.FAILED
+    assert result.detail is not None
+    assert "context mismatch" in result.detail
+
+
+async def test_code_fix_failing_sandbox_result_is_reflected_in_pr_body() -> None:
+    executor, github_client = make_executor()
+    github_client.create_pull_request_from_diff.return_value = "https://github.com/octo/repo/pull/8"
+    action = _code_fix_action(
+        sandbox_result=SandboxResult(
+            passed=False, logs="1 failed", test_command="pytest", duration_seconds=0.5
+        )
+    )
+
+    await executor.execute(
+        make_drafted_action(action=action), make_issue(), dry_run=False, run_id=RUN_ID
+    )
+
+    _, kwargs = github_client.create_pull_request_from_diff.call_args
+    assert "FAILED" in kwargs["body"]

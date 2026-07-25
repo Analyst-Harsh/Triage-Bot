@@ -8,6 +8,12 @@ from graph.schemas.actions import (
     LabelAction,
     SandboxResult,
 )
+from graph.schemas.approval_decision import ActionDecision, ApprovalDecision
+from graph.schemas.approval_request import (
+    DIFF_PREVIEW_MAX_BYTES,
+    ApprovalRequest,
+    QueuedActionSummary,
+)
 from graph.schemas.draft import DraftedAction, DraftOutput, DraftProposal, ProposedAction
 from graph.schemas.enums import (
     ActionType,
@@ -33,10 +39,14 @@ from graph.schemas.run_meta import RunError, RunMeta
 from graph.schemas.sandbox import SandboxAttempt
 
 __all__ = [
+    "DIFF_PREVIEW_MAX_BYTES",
+    "ActionDecision",
     "ActionPostResult",
     "ActionRiskAssessment",
     "ActionRiskJudgment",
     "ActionType",
+    "ApprovalDecision",
+    "ApprovalRequest",
     "CloseAction",
     "CodeFixAction",
     "CodeFixIntent",
@@ -58,6 +68,7 @@ __all__ = [
     "PostOutcome",
     "PostResults",
     "ProposedAction",
+    "QueuedActionSummary",
     "ResearchFindings",
     "ResearchSummary",
     "RiskAssessment",

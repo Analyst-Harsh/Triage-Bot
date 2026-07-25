@@ -15,8 +15,10 @@ class ActionPostResult(BaseModel):
         default=None,
         description=(
             "GitHub comment URL when a comment was actually POSTED; the "
-            "error message when FAILED; unused (None) for QUEUED or for a "
-            "successful label/close (nothing distinct to point at)."
+            "created PR's URL when a POSTED code_fix became a pull request; "
+            "the error message when FAILED; the reviewer's note (or None) "
+            "when REJECTED; unused (None) for QUEUED or for a successful "
+            "label/close (nothing distinct to point at)."
         ),
     )
 

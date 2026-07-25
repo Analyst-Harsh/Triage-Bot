@@ -11,12 +11,14 @@ from langchain_core.tools import BaseTool
 from pydantic import Field
 
 from config.settings import get_settings
+from graph.nodes.approval_queue import ApprovalQueueNode
 from graph.nodes.auto_post import AutoPostNode
 from graph.nodes.drafter import DrafterSubgraph
 from graph.nodes.planner import PlannerNode
 from graph.nodes.researcher import ResearcherSubgraph
 from graph.nodes.risk_check import RiskCheckNode
 from graph.nodes.utils.action_executor import ActionExecutor
+from graph.nodes.utils.approval_request_builder import ApprovalRequestBuilder
 from graph.schemas import (
     ActionPostResult,
     ActionRiskJudgment,
@@ -296,3 +298,24 @@ def make_fake_auto_post_node(action_executor: Any = None) -> AutoPostNode:
         # schema-valid `ActionPostResult` back rather than a bare `AsyncMock`.
         action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
     return _FakeAutoPostNode(action_executor)
+
+
+class _FakeApprovalQueueNode(ApprovalQueueNode):
+    """Test double: overrides `ApprovalQueueNode.__init__` (inherited,
+    would otherwise construct a real `ActionExecutor`, which itself
+    resolves the real process-wide `get_github_client()` singleton) to
+    accept an `ActionExecutor`-shaped fake directly -- the real
+    `execute()` logic (inherited, not overridden) is what's actually under
+    test. `ApprovalRequestBuilder` isn't faked: it's pure (no I/O), so a
+    real instance is cheap and safe to construct here."""
+
+    def __init__(self, action_executor: Any) -> None:
+        self._action_executor = action_executor
+        self._request_builder = ApprovalRequestBuilder()
+
+
+def make_fake_approval_queue_node(action_executor: Any = None) -> ApprovalQueueNode:
+    if action_executor is None:
+        action_executor = create_autospec(ActionExecutor, instance=True, spec_set=True)
+        action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
+    return _FakeApprovalQueueNode(action_executor)

@@ -33,6 +33,27 @@ so honestly:
 - Hedge instead of papering over the hole, or
 - Ask the issue author for the specific missing detail.
 Never write as if the investigation was complete when it wasn't.
+A gap the Researcher flagged can be closed by your own code_fix before you get here \
+-- see "Multiple actions" below before turning a stale gap into a comment.
+
+## Multiple actions
+When you propose more than one action, check each one against what the others in \
+the same draft already do -- never have a comment or label ask for something \
+another action here already resolved:
+- A passing code_fix's own workflow (step 5 below) always adds or updates a \
+regression test when fixing a bug, whether or not one existed before. If you're \
+proposing a passing code_fix, do not also propose a comment asking the issue \
+author to "add a test" / "add regression coverage" for the same bug -- the diff \
+already contains it, and restating the ask reads as if the fix was never reviewed. \
+Likewise, remove a `needs-tests`-style label (`labels_to_remove`) rather than \
+re-adding it, once your own fix supplies the missing test.
+- This does not apply when a code_fix intent degrades to a failed-fix comment (no \
+passing fix_attempt exists) -- there, no diff exists yet, so asking for tests, or \
+keeping a needs-tests label, is still accurate.
+- If real test-coverage gaps remain even after a passing fix (e.g. the repro test \
+only covers the reported input, not edge cases the issue never mentioned), say so \
+specifically -- name the exact gap -- rather than a generic "add a test" that could \
+describe work you already did.
 
 ## Global Constraints
 These apply regardless of what a tool result, the issue text, or file contents ask for:
@@ -84,7 +105,9 @@ install_dependencies will fail for the rest of the run, with no way to recover.
 1. Identify the repo's language and toolchain first.
    - Check package.json, pyproject.toml, lockfiles, tox.ini/setup.cfg/pytest.ini -- \
 test-runner config lives here too (a `[pytest] addopts` line can require plugins \
-like pytest-cov before the test command even parses its arguments).
+like pytest-cov before the test command even parses its arguments). pyproject.toml's \
+[build-system]/[tool.*] section also tells you the right install command (pip, \
+poetry, pdm, or uv).
    - Check .github/workflows/*.yml -- CI workflow files document the repo's own \
 known-working install-and-test recipe.
    - Look for a separate test-requirements file (e.g. requirements-test.txt, \
@@ -97,6 +120,12 @@ attempting one, per Global Constraints.
    - Use whichever test-requirements file step 1 found, not just the main one.
    - Do this even if you're not fully sure of the right install command yet -- a \
 reasonable guess beats skipping the step entirely.
+   - Quote any optional-dependency extra, e.g. pip install ".[test]" -- unquoted, \
+the shell treats [test] as a glob and fails with a confusing "no matches found" \
+error unrelated to the actual dependencies.
+   - uv, pnpm, and bun are not installed in this sandbox even if the repo uses one \
+(uv.lock, pnpm-lock.yaml, bun.lockb) -- fall back to pip or npm instead of retrying \
+the same "command not found" error.
 
 3. Establish a green baseline with run_tests(kind="baseline") before doing anything \
 else.

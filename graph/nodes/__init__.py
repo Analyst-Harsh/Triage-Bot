@@ -7,6 +7,7 @@ from graph.nodes.llm_node import LLMNode
 from graph.nodes.planner import PlannerNode
 from graph.nodes.researcher import ResearcherSubgraph
 from graph.nodes.risk_check import RiskCheckNode
+from graph.nodes.routing import route_after_auto_post
 from graph.nodes.utils.action_executor import ActionExecutor
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "ResearcherSubgraph",
     "RiskCheckNode",
     "TriageNode",
+    "route_after_auto_post",
 ]

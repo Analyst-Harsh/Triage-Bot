@@ -6,17 +6,20 @@ Houses the first slice of the "replay" pipeline (see AGENTS.md) — pulling a
 single historical issue and mapping it onto our own `IssuePayload` contract
 — plus the write-side GitHub calls AutoPostNode makes for low-risk actions.
 Named `github_client.py`, not `github.py`, so this submodule's dotted path
-(`api.github_client`) is never visually confused with the installed `github`
-(PyGithub) top-level package imported below.
+(`utils.github_client`) is never visually confused with the installed
+`github` (PyGithub) top-level package imported below.
 """
 
 from functools import lru_cache
 
-from github import Auth, Github
+from github import Auth, Github, GithubException
+from github.InputGitTreeElement import InputGitTreeElement
 from github.Issue import Issue
+from github.Repository import Repository
 
 from config.settings import get_settings
 from graph.schemas import IssuePayload, IssueSource
+from utils.diff_applier import AppliedFile, DiffApplier, DiffApplyError
 
 
 class GitHubClient:
@@ -26,13 +29,14 @@ class GitHubClient:
     construction, not something a caller hands in. Constructed once as a
     process-wide singleton via `get_github_client()` below, not
     re-instantiated per call site. Tests that need a fake subclass this
-    class and override `__init__` (see `tests/api/test_github_client.py`'s
+    class and override `__init__` (see `tests/utils/test_github_client.py`'s
     `_FakeGitHubClient`) rather than this constructor taking an injectable
     parameter.
     """
 
     def __init__(self) -> None:
         self._github = _build_raw_client()
+        self._diff_applier = DiffApplier()
 
     @property
     def raw(self) -> Github:
@@ -96,8 +100,72 @@ class GitHubClient:
             issue.create_comment(close_comment)
         issue.edit(state="closed")
 
+    def create_pull_request_from_diff(
+        self,
+        repo_full_name: str,
+        *,
+        diff: str,
+        target_files: list[str],
+        base_commit_sha: str,
+        base_branch: str,
+        branch_name: str,
+        title: str,
+        body: str,
+    ) -> str:
+        """Applies `diff` strictly against `base_commit_sha` (via
+        `self._diff_applier`) and opens a pull request from the result.
+        Returns the created PR's URL.
+
+        `target_files` is the full set of paths `diff` touches (adds,
+        modifies, or deletes) -- each is fetched at `base_commit_sha` first;
+        a 404 means the diff adds that path, so its base content is `None`.
+
+        No blanket try/except, matching every other write method here:
+        `GithubException` (any GitHub call) and `DiffApplyError` (the diff
+        doesn't apply cleanly, or a fetched file isn't valid UTF-8)
+        propagate to the caller (`ActionExecutor`).
+        """
+        repo = self._github.get_repo(repo_full_name)
+        base_files = {
+            path: self._fetch_base_content(repo, path, base_commit_sha) for path in target_files
+        }
+        applied_files = self._diff_applier.apply(diff, base_files)
+
+        base_commit = repo.get_git_commit(base_commit_sha)
+        tree_elements = [_tree_element(applied) for applied in applied_files]
+        tree = repo.create_git_tree(tree_elements, base_tree=base_commit.tree)
+        commit = repo.create_git_commit(message=title, tree=tree, parents=[base_commit])
+        repo.create_git_ref(f"refs/heads/{branch_name}", commit.sha)
+        pull_request = repo.create_pull(base=base_branch, head=branch_name, title=title, body=body)
+        return pull_request.html_url
+
+    def _fetch_base_content(self, repo: Repository, path: str, ref: str) -> str | None:
+        try:
+            content_file = repo.get_contents(path, ref=ref)
+        except GithubException as exc:
+            if exc.status == 404:
+                return None
+            raise
+        if isinstance(content_file, list):
+            raise DiffApplyError(f"{path!r} is a directory, not a file, at ref {ref!r}")
+        try:
+            return content_file.decoded_content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise DiffApplyError(f"{path!r} is not valid UTF-8 at ref {ref!r}") from exc
+
     def _get_issue(self, repo_full_name: str, issue_number: int) -> Issue:
         return self._github.get_repo(repo_full_name).get_issue(issue_number)
+
+
+def _tree_element(applied: AppliedFile) -> InputGitTreeElement:
+    """`content=` is passed inline rather than pre-creating a blob via
+    `create_git_blob` -- the Git Data API's tree endpoint accepts raw
+    (non-base64) content directly and creates the blob itself, so this
+    skips one API round trip per changed file. `sha=None` is the Git Data
+    API's own way of marking a tree entry for deletion."""
+    if applied.content is None:
+        return InputGitTreeElement(applied.path, "100644", "blob", sha=None)
+    return InputGitTreeElement(applied.path, "100644", "blob", content=applied.content)
 
 
 def _build_raw_client() -> Github:

@@ -64,3 +64,9 @@ def test_post_results_with_multiple_action_results() -> None:
         PostOutcome.QUEUED,
         PostOutcome.FAILED,
     ]
+
+
+def test_action_post_result_rejected_outcome() -> None:
+    result = make_action_post_result(outcome=PostOutcome.REJECTED, detail="Too risky for now.")
+    assert result.outcome is PostOutcome.REJECTED
+    assert result.detail == "Too risky for now."

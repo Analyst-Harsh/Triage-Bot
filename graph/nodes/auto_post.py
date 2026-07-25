@@ -14,9 +14,15 @@ log = structlog.get_logger(__name__)
 
 class AutoPostNode(TriageNode):
     """Applies every LOW-risk drafted action for real (comment/label/close)
-    via GitHub; anything riskier is left for `ApprovalQueueNode`. `code_fix`
-    actions are never LOW risk by `RiskCheckNode` policy, so this node never
-    routes one to the `ActionExecutor`.
+    via GitHub; anything riskier is left queued for `ApprovalQueueNode`.
+    `code_fix` actions are never LOW risk by `RiskCheckNode` policy, so this
+    node never routes one to the `ActionExecutor` -- posting a code fix (as
+    a pull request) only ever happens after human approval.
+
+    Status reflects whether anything was left queued: `AUTO_POSTED` when
+    every action was LOW risk (the run is finished), `PENDING_APPROVAL`
+    when at least one action needs a human decision (the run continues to
+    `approval_queue` -- see `route_after_auto_post` in `graph/nodes/routing.py`).
     """
 
     name: ClassVar[NodeName] = NodeName.AUTO_POST
@@ -31,7 +37,8 @@ class AutoPostNode(TriageNode):
             raise ValueError("auto_post called before draft/risk_assessment was set")
 
         issue = state["issue"]
-        dry_run = state["run_meta"].dry_run
+        run_meta = state["run_meta"]
+        dry_run = run_meta.dry_run
 
         results: list[ActionPostResult] = []
         for drafted, assessment in zip(
@@ -42,10 +49,13 @@ class AutoPostNode(TriageNode):
                 continue
 
             results.append(
-                await self._action_executor.execute(drafted.action, issue, dry_run=dry_run)
+                await self._action_executor.execute(
+                    drafted, issue, dry_run=dry_run, run_id=run_meta.run_id
+                )
             )
 
         post_results = PostResults(action_results=results, evaluated_at=datetime.now(UTC))
+        any_queued = any(r.outcome == PostOutcome.QUEUED for r in results)
         log.info(
             "auto_post_completed",
             issue_number=issue.issue_number,
@@ -54,4 +64,5 @@ class AutoPostNode(TriageNode):
             queued=sum(1 for r in results if r.outcome == PostOutcome.QUEUED),
             dry_run=dry_run,
         )
-        return TriageStateUpdate(post_results=post_results, status=RunStatus.AUTO_POSTED)
+        status = RunStatus.PENDING_APPROVAL if any_queued else RunStatus.AUTO_POSTED
+        return TriageStateUpdate(post_results=post_results, status=status)
