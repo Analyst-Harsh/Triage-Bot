@@ -42,6 +42,19 @@ class Settings(BaseSettings):
     drafter_test_log_success_max_chars: int = 500
     drafter_test_log_failure_max_chars: int = 3_000
 
+    # Episodic memory (Postgres + pgvector). Unset by default -- mirrors
+    # docmind_mcp_command's optional-feature pattern: nodes degrade to a
+    # no-op NullEpisodicMemoryStore rather than requiring this store.
+    episodic_memory_database_url: str | None = None
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
+    episodic_memory_top_k: int = 3
+    # `EpisodicMemoryStore.find_similar` searches this prefix across every
+    # repo's sub-namespace, so retrieval stays cross-repo (a similar issue in
+    # another repo is still a useful signal); `save_episode` writes one level
+    # deeper, namespaced per repo underneath it.
+    episodic_memory_namespace_prefix: tuple[str, ...] = ("episodes",)
+
 
 @lru_cache
 def get_settings() -> Settings:

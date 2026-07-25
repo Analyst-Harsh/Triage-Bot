@@ -19,6 +19,7 @@ from graph.nodes import (
 from graph.schemas import RunError, RunStatus
 from graph.state import TriageState, TriageStateUpdate
 from tools.sandbox import SandboxHandle
+from utils.episodic_memory_store import BaseEpisodicMemoryStore, NullEpisodicMemoryStore
 
 log = structlog.get_logger(__name__)
 
@@ -50,6 +51,7 @@ def build_graph(
     researcher_tools: list[BaseTool] | None = None,
     drafter_tools: list[BaseTool] | None = None,
     drafter_sandbox_handle: SandboxHandle | None = None,
+    memory_store: BaseEpisodicMemoryStore | None = None,
 ) -> CompiledStateGraph[TriageState]:
     """Wires the Planner -> Researcher -> Drafter -> Risk check -> Auto-post
     pipeline. From `auto_post`, `route_after_auto_post` conditionally routes
@@ -73,6 +75,16 @@ def build_graph(
     `GitHubClient` internally (via `get_github_client()`), so it isn't
     threaded through here at all.
 
+    `memory_store` is likewise already-constructed (`main.py` opens it via
+    `utils.episodic_memory_store.episodic_memory_store()`, an async context
+    manager -- the underlying `AsyncPostgresStore` connection pool needs real
+    open/close lifecycle, unlike `GitHubClient`'s singleton) and defaults to
+    a `NullEpisodicMemoryStore()` no-op when omitted. It's threaded into
+    `PlannerNode` (reads similar past
+    episodes), `AutoPostNode`, and `ApprovalQueueNode` (each writes a
+    completed run's outcome back) -- no new nodes or edges for episodic
+    memory.
+
     Every simple node here is a `TriageNode` (see `graph/nodes/base.py`).
     The Researcher and the Drafter are `AgentSubgraph`s instead — their own
     compiled `StateGraph`s registered directly via
@@ -86,12 +98,13 @@ def build_graph(
     )
 
     # Nodes
-    planner = PlannerNode()
+    memory_store = memory_store or NullEpisodicMemoryStore()
+    planner = PlannerNode(memory_store)
     researcher = ResearcherSubgraph(researcher_tools or [])
     drafter = DrafterSubgraph(drafter_tools or [], sandbox_handle=drafter_sandbox_handle)
     risk_check = RiskCheckNode()
-    auto_post = AutoPostNode()
-    approval_queue = ApprovalQueueNode()
+    auto_post = AutoPostNode(memory_store)
+    approval_queue = ApprovalQueueNode(memory_store)
 
     # Add nodes and edges. The Researcher's and Drafter's compiled subgraphs
     # are what get registered under their names, not the `AgentSubgraph`

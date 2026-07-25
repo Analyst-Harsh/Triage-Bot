@@ -1,7 +1,20 @@
 from datetime import UTC, datetime
+from typing import Any
 
-from graph.schemas import IssuePayload, IssueSource
-from prompts.planner import PLANNER_PROMPT, format_issue_for_prompt
+from graph.schemas import (
+    ActionType,
+    EpisodicActionOutcome,
+    EpisodicMemoryHit,
+    IssuePayload,
+    IssueSource,
+    PostOutcome,
+    RunStatus,
+)
+from prompts.planner import (
+    PLANNER_PROMPT,
+    format_episodic_context_for_prompt,
+    format_issue_for_prompt,
+)
 
 
 def _make_issue(**overrides: object) -> IssuePayload:
@@ -51,11 +64,59 @@ def test_format_issue_for_prompt_without_author_association() -> None:
     assert "association: NONE" in formatted
 
 
+def make_hit(**overrides: Any) -> EpisodicMemoryHit:
+    defaults: dict[str, Any] = {
+        "past_issue_number": 17,
+        "past_repo": "octo/repo",
+        "summary": "Similar startup crash last month.",
+        "actions_taken": [
+            EpisodicActionOutcome(action_type=ActionType.COMMENT, outcome=PostOutcome.POSTED)
+        ],
+        "outcome": RunStatus.APPROVED_AND_POSTED,
+        "similarity_score": 0.91,
+        "retrieved_at": datetime.now(UTC),
+    }
+    defaults.update(overrides)
+    return EpisodicMemoryHit(**defaults)
+
+
 def test_planner_prompt_renders_issue_text() -> None:
     issue = _make_issue()
-    messages = PLANNER_PROMPT.format_messages(issue_text=format_issue_for_prompt(issue))
+    messages = PLANNER_PROMPT.format_messages(
+        issue_text=format_issue_for_prompt(issue),
+        episodic_context_text=format_episodic_context_for_prompt([]),
+    )
 
     assert len(messages) == 2
     assert messages[0].type == "system"
     assert messages[1].type == "human"
     assert "octo/repo" in messages[1].content
+
+
+def test_format_episodic_context_for_prompt_empty_when_no_hits() -> None:
+    assert format_episodic_context_for_prompt([]) == ""
+
+
+def test_format_episodic_context_for_prompt_renders_hits() -> None:
+    hit = make_hit()
+
+    formatted = format_episodic_context_for_prompt([hit])
+
+    assert "Similar startup crash last month." in formatted
+    assert "#17" in formatted
+    assert "octo/repo" in formatted
+    assert "approved_and_posted" in formatted
+    assert "comment (posted)" in formatted
+
+
+def test_format_episodic_context_for_prompt_renders_multiple_actions_with_outcomes() -> None:
+    hit = make_hit(
+        actions_taken=[
+            EpisodicActionOutcome(action_type=ActionType.LABEL, outcome=PostOutcome.POSTED),
+            EpisodicActionOutcome(action_type=ActionType.COMMENT, outcome=PostOutcome.REJECTED),
+        ]
+    )
+
+    formatted = format_episodic_context_for_prompt([hit])
+
+    assert "label (posted), comment (rejected)" in formatted

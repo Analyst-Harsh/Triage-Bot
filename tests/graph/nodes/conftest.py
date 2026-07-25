@@ -19,6 +19,7 @@ from graph.nodes.researcher import ResearcherSubgraph
 from graph.nodes.risk_check import RiskCheckNode
 from graph.nodes.utils.action_executor import ActionExecutor
 from graph.nodes.utils.approval_request_builder import ApprovalRequestBuilder
+from graph.nodes.utils.episodic_memory_gateway import EpisodicMemoryGateway
 from graph.schemas import (
     ActionPostResult,
     ActionRiskJudgment,
@@ -37,6 +38,7 @@ from graph.schemas import (
 )
 from graph.state import TriageState, create_initial_state
 from tools.sandbox import SandboxHandle
+from utils.episodic_memory_store import BaseEpisodicMemoryStore, NullEpisodicMemoryStore
 
 
 def make_issue() -> IssuePayload:
@@ -156,13 +158,21 @@ class _FakePlannerNode(PlannerNode):
     what's actually under test."""
 
     def __init__(
-        self, primary_model: FakeStructuredChatModel, fallback_model: FakeStructuredChatModel
+        self,
+        primary_model: FakeStructuredChatModel,
+        fallback_model: FakeStructuredChatModel,
+        memory_store: BaseEpisodicMemoryStore | None = None,
     ) -> None:
         self._primary_model = primary_model
         self._fallback_model = fallback_model
+        self._memory_gateway = EpisodicMemoryGateway(memory_store or NullEpisodicMemoryStore())
 
 
-def make_fake_planner_node(*, parsed_result: PlannerClassification | None = None) -> PlannerNode:
+def make_fake_planner_node(
+    memory_store: BaseEpisodicMemoryStore | None = None,
+    *,
+    parsed_result: PlannerClassification | None = None,
+) -> PlannerNode:
     if parsed_result is None:
         parsed_result = PlannerClassification(
             issue_type=IssueType.BUG,
@@ -175,7 +185,9 @@ def make_fake_planner_node(*, parsed_result: PlannerClassification | None = None
     # (e.g. estimated_cost_usd increasing) get a realistic non-zero cost.
     primary = make_fake_chat_model(model_name="gpt-4o-mini", parsed_result=parsed_result)
     fallback = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
-    return _FakePlannerNode(primary_model=primary, fallback_model=fallback)
+    return _FakePlannerNode(
+        primary_model=primary, fallback_model=fallback, memory_store=memory_store
+    )
 
 
 class _FakeRiskCheckNode(RiskCheckNode):
@@ -286,18 +298,23 @@ class _FakeAutoPostNode(AutoPostNode):
     `ActionExecutor`-shaped fake directly -- the real `execute()` logic
     (inherited, not overridden) is what's actually under test."""
 
-    def __init__(self, action_executor: Any) -> None:
+    def __init__(
+        self, action_executor: Any, memory_store: BaseEpisodicMemoryStore | None = None
+    ) -> None:
         self._action_executor = action_executor
+        self._memory_gateway = EpisodicMemoryGateway(memory_store or NullEpisodicMemoryStore())
 
 
-def make_fake_auto_post_node(action_executor: Any = None) -> AutoPostNode:
+def make_fake_auto_post_node(
+    memory_store: BaseEpisodicMemoryStore | None = None, *, action_executor: Any = None
+) -> AutoPostNode:
     if action_executor is None:
         action_executor = create_autospec(ActionExecutor, instance=True, spec_set=True)
         # Default stub result so callers that don't care about ActionExecutor
         # behavior (e.g. builder-level integration tests) get a real,
         # schema-valid `ActionPostResult` back rather than a bare `AsyncMock`.
         action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
-    return _FakeAutoPostNode(action_executor)
+    return _FakeAutoPostNode(action_executor, memory_store)
 
 
 class _FakeApprovalQueueNode(ApprovalQueueNode):
@@ -309,13 +326,18 @@ class _FakeApprovalQueueNode(ApprovalQueueNode):
     test. `ApprovalRequestBuilder` isn't faked: it's pure (no I/O), so a
     real instance is cheap and safe to construct here."""
 
-    def __init__(self, action_executor: Any) -> None:
+    def __init__(
+        self, action_executor: Any, memory_store: BaseEpisodicMemoryStore | None = None
+    ) -> None:
         self._action_executor = action_executor
         self._request_builder = ApprovalRequestBuilder()
+        self._memory_gateway = EpisodicMemoryGateway(memory_store or NullEpisodicMemoryStore())
 
 
-def make_fake_approval_queue_node(action_executor: Any = None) -> ApprovalQueueNode:
+def make_fake_approval_queue_node(
+    memory_store: BaseEpisodicMemoryStore | None = None, *, action_executor: Any = None
+) -> ApprovalQueueNode:
     if action_executor is None:
         action_executor = create_autospec(ActionExecutor, instance=True, spec_set=True)
         action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
-    return _FakeApprovalQueueNode(action_executor)
+    return _FakeApprovalQueueNode(action_executor, memory_store)

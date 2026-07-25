@@ -14,7 +14,9 @@ from graph.schemas import (
     CommentAction,
     DraftedAction,
     DraftOutput,
+    IssueType,
     LabelAction,
+    PlannerOutput,
     PostOutcome,
     PostResults,
     RiskAssessment,
@@ -23,6 +25,7 @@ from graph.schemas import (
 )
 from graph.state import TriageState
 from tests.graph.nodes.conftest import make_fake_approval_queue_node
+from utils.episodic_memory_store import BaseEpisodicMemoryStore, EpisodicMemoryUnavailableError
 
 
 def _draft(actions: list[DraftedAction]) -> DraftOutput:
@@ -71,6 +74,22 @@ def _close_action() -> DraftedAction:
 
 def make_fake_action_executor() -> Any:
     return create_autospec(ActionExecutor, instance=True, spec_set=True)
+
+
+def make_planner_output(**overrides: Any) -> PlannerOutput:
+    defaults: dict[str, Any] = {
+        "issue_type": IssueType.BUG,
+        "classification_confidence": 0.9,
+        "investigation_plan": [],
+        "reasoning": "Test reasoning.",
+        "classified_at": datetime.now(UTC),
+    }
+    defaults.update(overrides)
+    return PlannerOutput(**defaults)
+
+
+def make_memory_store_stub() -> Any:
+    return create_autospec(BaseEpisodicMemoryStore, instance=True, spec_set=True)
 
 
 def _set_up_queued_state(
@@ -153,7 +172,7 @@ async def test_interrupt_payload_lists_each_queued_action(
     monkeypatch.setattr(approval_queue_module, "interrupt", _capture_interrupt)
     action_executor = make_fake_action_executor()
     action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
-    node = make_fake_approval_queue_node(action_executor)
+    node = make_fake_approval_queue_node(action_executor=action_executor)
 
     await node.execute(triage_state)
 
@@ -183,7 +202,7 @@ async def test_no_side_effects_before_interrupt(
 
     monkeypatch.setattr(approval_queue_module, "interrupt", _raising_interrupt)
     action_executor = make_fake_action_executor()
-    node = make_fake_approval_queue_node(action_executor)
+    node = make_fake_approval_queue_node(action_executor=action_executor)
 
     with pytest.raises(_SentinelPauseError):
         await node.execute(triage_state)
@@ -204,7 +223,7 @@ async def test_approved_action_is_posted_and_overwrites_queued_slot(
     action_executor = make_fake_action_executor()
     posted_result = ActionPostResult(outcome=PostOutcome.POSTED, detail="comment-url")
     action_executor.execute.return_value = posted_result
-    node = make_fake_approval_queue_node(action_executor)
+    node = make_fake_approval_queue_node(action_executor=action_executor)
 
     update = await node.execute(triage_state)
 
@@ -229,7 +248,7 @@ async def test_rejected_action_recorded_as_rejected_and_not_posted(
         {"decisions": [{"index": 0, "approved": False, "note": "Too risky right now."}]},
     )
     action_executor = make_fake_action_executor()
-    node = make_fake_approval_queue_node(action_executor)
+    node = make_fake_approval_queue_node(action_executor=action_executor)
 
     update = await node.execute(triage_state)
 
@@ -256,7 +275,7 @@ async def test_prior_auto_posted_slots_are_untouched(
     action_executor = make_fake_action_executor()
     approved_result = ActionPostResult(outcome=PostOutcome.POSTED, detail="new-url")
     action_executor.execute.return_value = approved_result
-    node = make_fake_approval_queue_node(action_executor)
+    node = make_fake_approval_queue_node(action_executor=action_executor)
 
     update = await node.execute(triage_state)
 
@@ -312,7 +331,7 @@ async def test_mixed_decisions_set_status_approved_and_posted(
     )
     action_executor = make_fake_action_executor()
     action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
-    node = make_fake_approval_queue_node(action_executor)
+    node = make_fake_approval_queue_node(action_executor=action_executor)
 
     update = await node.execute(triage_state)
 
@@ -330,11 +349,12 @@ async def test_dry_run_and_run_id_are_passed_to_executor(
         risk_levels=[RiskLevel.MEDIUM],
         outcomes=[PostOutcome.QUEUED],
     )
+    triage_state["planner_output"] = make_planner_output()
     triage_state["run_meta"] = triage_state["run_meta"].model_copy(update={"dry_run": False})
     _stub_interrupt_returning(monkeypatch, {"decisions": [{"index": 0, "approved": True}]})
     action_executor = make_fake_action_executor()
     action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
-    node = make_fake_approval_queue_node(action_executor)
+    node = make_fake_approval_queue_node(action_executor=action_executor)
 
     await node.execute(triage_state)
 
@@ -417,7 +437,7 @@ async def test_call_bumps_iteration_count(
     _stub_interrupt_returning(monkeypatch, {"decisions": [{"index": 0, "approved": True}]})
     action_executor = make_fake_action_executor()
     action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
-    node = make_fake_approval_queue_node(action_executor)
+    node = make_fake_approval_queue_node(action_executor=action_executor)
 
     update = await node(triage_state)
 
@@ -425,3 +445,72 @@ async def test_call_bumps_iteration_count(
     run_meta = update["run_meta"]
     assert run_meta is not None
     assert run_meta.iteration_count == 1
+
+
+async def test_saves_episode_when_not_dry_run(
+    triage_state: TriageState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _set_up_queued_state(
+        triage_state,
+        actions=[_comment_action()],
+        risk_levels=[RiskLevel.MEDIUM],
+        outcomes=[PostOutcome.QUEUED],
+    )
+    triage_state["planner_output"] = make_planner_output()
+    triage_state["run_meta"] = triage_state["run_meta"].model_copy(update={"dry_run": False})
+    _stub_interrupt_returning(monkeypatch, {"decisions": [{"index": 0, "approved": True}]})
+    action_executor = make_fake_action_executor()
+    action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
+    memory_store = make_memory_store_stub()
+    node = make_fake_approval_queue_node(memory_store, action_executor=action_executor)
+
+    await node.execute(triage_state)
+
+    memory_store.save_episode.assert_awaited_once()
+    call_kwargs = memory_store.save_episode.await_args.kwargs
+    assert call_kwargs["outcome"] == RunStatus.APPROVED_AND_POSTED
+    assert call_kwargs["run_id"] == triage_state["run_meta"].run_id
+
+
+async def test_does_not_save_episode_when_dry_run(
+    triage_state: TriageState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _set_up_queued_state(
+        triage_state,
+        actions=[_comment_action()],
+        risk_levels=[RiskLevel.MEDIUM],
+        outcomes=[PostOutcome.QUEUED],
+    )
+    _stub_interrupt_returning(monkeypatch, {"decisions": [{"index": 0, "approved": True}]})
+    action_executor = make_fake_action_executor()
+    action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
+    memory_store = make_memory_store_stub()
+    node = make_fake_approval_queue_node(memory_store, action_executor=action_executor)
+
+    await node.execute(triage_state)
+
+    memory_store.save_episode.assert_not_awaited()
+
+
+async def test_memory_store_failure_does_not_fail_run(
+    triage_state: TriageState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _set_up_queued_state(
+        triage_state,
+        actions=[_comment_action()],
+        risk_levels=[RiskLevel.MEDIUM],
+        outcomes=[PostOutcome.QUEUED],
+    )
+    triage_state["planner_output"] = make_planner_output()
+    triage_state["run_meta"] = triage_state["run_meta"].model_copy(update={"dry_run": False})
+    _stub_interrupt_returning(monkeypatch, {"decisions": [{"index": 0, "approved": True}]})
+    action_executor = make_fake_action_executor()
+    action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
+    memory_store = make_memory_store_stub()
+    memory_store.save_episode.side_effect = EpisodicMemoryUnavailableError("connection refused")
+    node = make_fake_approval_queue_node(memory_store, action_executor=action_executor)
+
+    update = await node.execute(triage_state)
+
+    assert "status" in update
+    assert update["status"] == RunStatus.APPROVED_AND_POSTED

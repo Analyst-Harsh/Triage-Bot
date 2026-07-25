@@ -23,9 +23,7 @@
       "Bash(uv run pyright)",
       "Bash(uv run pytest)",
       "Bash(uv run pytest *)",
-      "Read(**)",
-      "Grep(**)",
-      "Glob(**)"
+      "Read(**)"
     ]
   },
   "hooks": {

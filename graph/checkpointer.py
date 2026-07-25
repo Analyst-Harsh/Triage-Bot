@@ -39,7 +39,12 @@ async def sqlite_checkpointer(
 ) -> AsyncGenerator[AsyncSqliteSaver]:
     """Local-dev checkpointer factory: a SQLite-backed `AsyncSqliteSaver`
     scoped to the connection's lifetime. Production will get its own
-    Postgres-backed factory once `api/` lands (see AGENTS.md).
+    Postgres-backed factory once `api/` lands (see AGENTS.md) --
+    `langgraph.checkpoint.postgres.aio.AsyncPostgresSaver` is already
+    available for this via `langgraph-checkpoint-postgres` (the same
+    dependency `utils/episodic_memory_store.py`'s `AsyncPostgresStore` uses),
+    so no new dependency is needed when that lands; its `from_conn_string()`
+    is an async context manager with the same shape as this one.
 
     Opens the connection directly (mirroring what
     `AsyncSqliteSaver.from_conn_string` does internally) rather than using

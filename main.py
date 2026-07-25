@@ -23,10 +23,11 @@ from graph.state import TriageState, create_initial_state
 from observability.logging_config import configure_logging
 from tools.mcp_clients import researcher_toolset
 from tools.sandbox import sandbox_toolset
+from utils.episodic_memory_store import episodic_memory_store
 from utils.github_client import get_github_client
 
 REPO_FULL_NAME = "Analyst-Harsh/triage-bot-test"
-ISSUE_NUMBER = 3
+ISSUE_NUMBER = 1
 RESULTS_DIR = Path("results")
 
 log = structlog.get_logger(__name__)
@@ -131,12 +132,14 @@ async def main() -> None:
             sandbox_tools,
             sandbox_handle,
         ),
+        episodic_memory_store(get_settings()) as memory_store,
     ):
         graph = build_graph(
             checkpointer=checkpointer,
             researcher_tools=tools,
             drafter_tools=sandbox_tools,
             drafter_sandbox_handle=sandbox_handle,
+            memory_store=memory_store,
         )
 
         # Probe for an already-pending approval on this thread *before*
