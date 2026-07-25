@@ -21,6 +21,14 @@ uv run python main.py          # run the replay pipeline against the demo issue
 
 `main.py` is resume-safe: if a run pauses for approval (a MEDIUM/HIGH-risk drafted action), it prompts interactively at the terminal for each queued action and posts whatever's approved. Re-running `uv run python main.py` while a prior run on the same issue is still paused resumes that pending approval instead of starting a duplicate run.
 
+### Episodic memory (optional)
+
+Set `EPISODIC_MEMORY_DATABASE_URL` in `.env` to enable it; leave unset and every node degrades to a no-op automatically. `docker compose up -d` starts a local Postgres + pgvector instance matching the DSN in `.env.example`, plus an [Adminer](https://www.adminer.org/) GUI at [localhost:8080](http://localhost:8080) to browse the `episodes` table (System: PostgreSQL, Server: `episodic-memory-db`, credentials: `triage_bot`/`triage_bot`/`triage_bot`).
+
+```bash
+docker compose up -d           # starts local pgvector-enabled Postgres + Adminer GUI
+```
+
 ## Documentation
 
 | | |

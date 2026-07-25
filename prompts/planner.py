@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate
 
 from graph.schemas.issue import IssuePayload
+from graph.schemas.memory import EpisodicMemoryHit
 
 PLANNER_SYSTEM_PROMPT = """You are the triage planner for an automated GitHub issue triage bot.
 
@@ -38,7 +39,7 @@ investigation is warranted (e.g. spam_or_abuse).
 PLANNER_PROMPT = ChatPromptTemplate.from_messages(
     [
         ("system", PLANNER_SYSTEM_PROMPT),
-        ("human", "{issue_text}"),
+        ("human", "{issue_text}\n\n{episodic_context_text}"),
     ]
 )
 
@@ -52,4 +53,27 @@ def format_issue_for_prompt(issue: IssuePayload) -> str:
         f"Author: {issue.author} (association: {issue.author_association or 'NONE'})\n"
         f"Existing labels: {labels}\n\n"
         f"Body:\n{issue.body}"
+    )
+
+
+def format_episodic_context_for_prompt(hits: list[EpisodicMemoryHit]) -> str:
+    """Renders a short "similar past issues" section from the top-k
+    episodic-memory hits -- 2-3 one-line summaries, not a wall of history.
+    Empty string (no section at all) when there's no memory yet."""
+    if not hits:
+        return ""
+    lines = [
+        f"- Issue #{hit.past_issue_number} in {hit.past_repo} "
+        f"(similarity {hit.similarity_score:.2f}): {hit.summary} "
+        f"— action(s): {_format_actions_taken(hit)}; outcome: {hit.outcome.value}"
+        for hit in hits
+    ]
+    return "Similar past issues and how they were handled:\n" + "\n".join(lines)
+
+
+def _format_actions_taken(hit: EpisodicMemoryHit) -> str:
+    """e.g. "comment (posted), label (rejected)" -- pairs each action type
+    with what actually happened to it, not just what was proposed."""
+    return ", ".join(
+        f"{action.action_type.value} ({action.outcome.value})" for action in hit.actions_taken
     )

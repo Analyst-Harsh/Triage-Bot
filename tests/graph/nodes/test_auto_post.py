@@ -12,7 +12,9 @@ from graph.schemas import (
     CommentAction,
     DraftedAction,
     DraftOutput,
+    IssueType,
     LabelAction,
+    PlannerOutput,
     PostOutcome,
     RiskAssessment,
     RiskLevel,
@@ -20,6 +22,7 @@ from graph.schemas import (
 )
 from graph.state import TriageState
 from tests.graph.nodes.conftest import make_fake_auto_post_node
+from utils.episodic_memory_store import BaseEpisodicMemoryStore, EpisodicMemoryUnavailableError
 
 
 def _draft(actions: list[DraftedAction]) -> DraftOutput:
@@ -66,6 +69,22 @@ def make_fake_action_executor() -> Any:
     return create_autospec(ActionExecutor, instance=True, spec_set=True)
 
 
+def make_planner_output(**overrides: Any) -> PlannerOutput:
+    defaults: dict[str, Any] = {
+        "issue_type": IssueType.BUG,
+        "classification_confidence": 0.9,
+        "investigation_plan": [],
+        "reasoning": "Test reasoning.",
+        "classified_at": datetime.now(UTC),
+    }
+    defaults.update(overrides)
+    return PlannerOutput(**defaults)
+
+
+def make_memory_store_stub() -> Any:
+    return create_autospec(BaseEpisodicMemoryStore, instance=True, spec_set=True)
+
+
 def _with_dry_run(state: TriageState, *, dry_run: bool) -> TriageState:
     state["run_meta"] = state["run_meta"].model_copy(update={"dry_run": dry_run})
     return state
@@ -84,7 +103,7 @@ async def test_low_risk_actions_are_routed_to_action_executor_in_order(
     comment_result = ActionPostResult(outcome=PostOutcome.POSTED, detail="comment-url")
     label_result = ActionPostResult(outcome=PostOutcome.FAILED, detail="boom")
     action_executor.execute.side_effect = [comment_result, label_result]
-    node = make_fake_auto_post_node(action_executor)
+    node = make_fake_auto_post_node(action_executor=action_executor)
 
     update = await node.execute(triage_state)
 
@@ -117,7 +136,7 @@ async def test_non_low_risk_actions_never_reach_action_executor(
     triage_state["draft"] = _draft([_close_action()])
     triage_state["risk_assessment"] = _risk([RiskLevel.HIGH])
     action_executor = make_fake_action_executor()
-    node = make_fake_auto_post_node(action_executor)
+    node = make_fake_auto_post_node(action_executor=action_executor)
 
     update = await node.execute(triage_state)
 
@@ -135,7 +154,7 @@ async def test_all_low_risk_actions_set_status_auto_posted(triage_state: TriageS
     triage_state["risk_assessment"] = _risk([RiskLevel.LOW, RiskLevel.LOW])
     action_executor = make_fake_action_executor()
     action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
-    node = make_fake_auto_post_node(action_executor)
+    node = make_fake_auto_post_node(action_executor=action_executor)
 
     update = await node.execute(triage_state)
 
@@ -155,7 +174,7 @@ async def test_call_bumps_iteration_count(triage_state: TriageState) -> None:
     triage_state["risk_assessment"] = _risk([RiskLevel.LOW])
     action_executor = make_fake_action_executor()
     action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
-    node = make_fake_auto_post_node(action_executor)
+    node = make_fake_auto_post_node(action_executor=action_executor)
 
     update = await node(triage_state)
 
@@ -163,3 +182,73 @@ async def test_call_bumps_iteration_count(triage_state: TriageState) -> None:
     run_meta = update["run_meta"]
     assert run_meta is not None
     assert run_meta.iteration_count == 1
+
+
+async def test_saves_episode_when_all_low_risk_and_not_dry_run(triage_state: TriageState) -> None:
+    triage_state["draft"] = _draft([_comment_action()])
+    triage_state["risk_assessment"] = _risk([RiskLevel.LOW])
+    triage_state["planner_output"] = make_planner_output()
+    _with_dry_run(triage_state, dry_run=False)
+    action_executor = make_fake_action_executor()
+    action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
+    memory_store = make_memory_store_stub()
+    node = make_fake_auto_post_node(memory_store, action_executor=action_executor)
+
+    update = await node.execute(triage_state)
+
+    assert "status" in update
+    assert update["status"] == RunStatus.AUTO_POSTED
+    memory_store.save_episode.assert_awaited_once()
+    call_kwargs = memory_store.save_episode.await_args.kwargs
+    assert call_kwargs["outcome"] == RunStatus.AUTO_POSTED
+    assert call_kwargs["run_id"] == triage_state["run_meta"].run_id
+
+
+async def test_does_not_save_episode_when_pending_approval(triage_state: TriageState) -> None:
+    triage_state["draft"] = _draft([_comment_action(), _close_action()])
+    triage_state["risk_assessment"] = _risk([RiskLevel.LOW, RiskLevel.MEDIUM])
+    triage_state["planner_output"] = make_planner_output()
+    _with_dry_run(triage_state, dry_run=False)
+    action_executor = make_fake_action_executor()
+    action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
+    memory_store = make_memory_store_stub()
+    node = make_fake_auto_post_node(memory_store, action_executor=action_executor)
+
+    update = await node.execute(triage_state)
+
+    assert "status" in update
+    assert update["status"] == RunStatus.PENDING_APPROVAL
+    memory_store.save_episode.assert_not_awaited()
+
+
+async def test_does_not_save_episode_when_dry_run(triage_state: TriageState) -> None:
+    triage_state["draft"] = _draft([_comment_action()])
+    triage_state["risk_assessment"] = _risk([RiskLevel.LOW])
+    triage_state["planner_output"] = make_planner_output()
+    action_executor = make_fake_action_executor()
+    action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
+    memory_store = make_memory_store_stub()
+    node = make_fake_auto_post_node(memory_store, action_executor=action_executor)
+
+    update = await node.execute(triage_state)
+
+    assert "status" in update
+    assert update["status"] == RunStatus.AUTO_POSTED
+    memory_store.save_episode.assert_not_awaited()
+
+
+async def test_memory_store_failure_does_not_fail_run(triage_state: TriageState) -> None:
+    triage_state["draft"] = _draft([_comment_action()])
+    triage_state["risk_assessment"] = _risk([RiskLevel.LOW])
+    triage_state["planner_output"] = make_planner_output()
+    _with_dry_run(triage_state, dry_run=False)
+    action_executor = make_fake_action_executor()
+    action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
+    memory_store = make_memory_store_stub()
+    memory_store.save_episode.side_effect = EpisodicMemoryUnavailableError("connection refused")
+    node = make_fake_auto_post_node(memory_store, action_executor=action_executor)
+
+    update = await node.execute(triage_state)
+
+    assert "status" in update
+    assert update["status"] == RunStatus.AUTO_POSTED

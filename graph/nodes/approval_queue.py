@@ -8,8 +8,10 @@ from graph.nodes.base import TriageNode
 from graph.nodes.node_names import NodeName
 from graph.nodes.utils.action_executor import ActionExecutor
 from graph.nodes.utils.approval_request_builder import ApprovalRequestBuilder
+from graph.nodes.utils.episodic_memory_gateway import EpisodicMemoryGateway
 from graph.schemas import ActionPostResult, ApprovalDecision, PostOutcome, PostResults, RunStatus
 from graph.state import TriageState, TriageStateUpdate
+from utils.episodic_memory_store import BaseEpisodicMemoryStore
 
 log = structlog.get_logger(__name__)
 
@@ -29,13 +31,19 @@ class ApprovalQueueNode(TriageNode):
     Only reached when `route_after_auto_post` (see `graph/nodes/routing.py`)
     finds at least one `PostOutcome.QUEUED` result; `execute()` raises if
     that invariant is somehow violated.
+
+    Always writes the completed episode to memory once resolved (unlike
+    `AutoPostNode`, which only writes on its own all-LOW-risk, no-approval-
+    needed branch) -- reaching the end of this node always means the run's
+    outcome is now final.
     """
 
     name: ClassVar[NodeName] = NodeName.APPROVAL_QUEUE
 
-    def __init__(self) -> None:
+    def __init__(self, memory_store: BaseEpisodicMemoryStore) -> None:
         self._action_executor: ActionExecutor = ActionExecutor()
         self._request_builder: ApprovalRequestBuilder = ApprovalRequestBuilder()
+        self._memory_gateway = EpisodicMemoryGateway(memory_store)
 
     async def execute(self, state: TriageState) -> TriageStateUpdate:
         draft = state["draft"]
@@ -89,6 +97,21 @@ class ApprovalQueueNode(TriageNode):
             dry_run=run_meta.dry_run,
         )
         status = RunStatus.APPROVED_AND_POSTED if any_approved else RunStatus.REJECTED
+
+        if not run_meta.dry_run:
+            planner_output = state["planner_output"]
+            if planner_output is None:
+                raise ValueError("approval_queue called before planner_output was set")
+            await self._memory_gateway.write(
+                run_id=run_meta.run_id,
+                issue=issue,
+                planner_output=planner_output,
+                draft_actions=draft.actions,
+                risk_assessment=risk_assessment,
+                post_results=updated_post_results,
+                outcome=status,
+            )
+
         return TriageStateUpdate(post_results=updated_post_results, status=status)
 
 

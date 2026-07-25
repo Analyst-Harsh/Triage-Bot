@@ -1,0 +1,24 @@
+services:
+  episodic-memory-db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: triage_bot
+      POSTGRES_PASSWORD: triage_bot  # pragma: allowlist secret
+      POSTGRES_DB: triage_bot
+    ports:
+      - "5432:5432"
+    volumes:
+      - episodic-memory-db-data:/var/lib/postgresql/data
+
+  # Postgres GUI: http://localhost:8080 -- System: PostgreSQL, Server:
+  # episodic-memory-db, Username/Password/Database: triage_bot (matches the
+  # env vars above). No separate setup/master password needed, unlike pgAdmin.
+  adminer:
+    image: adminer:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      - episodic-memory-db
+
+volumes:
+  episodic-memory-db-data:

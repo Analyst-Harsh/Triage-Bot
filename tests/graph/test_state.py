@@ -9,6 +9,7 @@ from graph.schemas import (
     CodeFixAction,
     DraftedAction,
     DraftOutput,
+    EpisodicActionOutcome,
     EpisodicMemoryHit,
     Evidence,
     IssuePayload,
@@ -119,8 +120,10 @@ def make_fully_populated_state() -> TriageState:
             past_issue_number=17,
             past_repo="octo/repo",
             summary="Similar config loader crash.",
-            action_taken=ActionType.CODE_FIX,
-            outcome="accepted",
+            actions_taken=[
+                EpisodicActionOutcome(action_type=ActionType.CODE_FIX, outcome=PostOutcome.POSTED)
+            ],
+            outcome=RunStatus.APPROVED_AND_POSTED,
             similarity_score=0.88,
             retrieved_at=datetime.now(UTC),
         )
