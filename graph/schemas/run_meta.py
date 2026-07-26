@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -50,5 +50,25 @@ class RunMeta(BaseModel):
                 "iteration_count": self.iteration_count + iterations,
                 "cache_read_tokens": self.cache_read_tokens + cache_read_tokens,
                 "cache_creation_tokens": self.cache_creation_tokens + cache_creation_tokens,
+            }
+        )
+
+    def with_error(self, *, node_name: str, error_message: str) -> RunMeta:
+        """Returns a copy with one more `RunError` appended to `errors` --
+        the same accumulation shape as `with_usage`, for nodes that catch
+        and convert a real failure (e.g. a GitHub post) into data rather
+        than letting it raise, so it still reaches the same place
+        `handle_node_error` (`graph/builder.py`) writes to for an uncaught
+        exception."""
+        return self.model_copy(
+            update={
+                "errors": [
+                    *self.errors,
+                    RunError(
+                        node_name=node_name,
+                        error_message=error_message,
+                        occurred_at=datetime.now(UTC),
+                    ),
+                ]
             }
         )

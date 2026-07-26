@@ -1,5 +1,3 @@
-from datetime import UTC, datetime
-
 import structlog
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -16,7 +14,7 @@ from graph.nodes import (
     RiskCheckNode,
     route_after_auto_post,
 )
-from graph.schemas import RunError, RunStatus
+from graph.schemas import RunStatus
 from graph.state import TriageState, TriageStateUpdate
 from tools.sandbox import SandboxHandle
 from utils.episodic_memory_store import BaseEpisodicMemoryStore, NullEpisodicMemoryStore
@@ -28,9 +26,6 @@ def handle_node_error(state: TriageState, error: NodeError) -> TriageStateUpdate
     """Graph-wide error handler (see `set_node_defaults` below): converts
     any node's uncaught exception into a `RunError` + `status=FAILED`
     update, rather than crashing the run."""
-    run_error = RunError(
-        node_name=error.node, error_message=str(error.error), occurred_at=datetime.now(UTC)
-    )
     log.error(
         "node_failed",
         node=error.node,
@@ -39,8 +34,8 @@ def handle_node_error(state: TriageState, error: NodeError) -> TriageStateUpdate
         thread_id=state["run_meta"].thread_id,
         exc_info=error.error,
     )
-    updated_run_meta = state["run_meta"].model_copy(
-        update={"errors": [*state["run_meta"].errors, run_error]}
+    updated_run_meta = state["run_meta"].with_error(
+        node_name=error.node, error_message=str(error.error)
     )
     return TriageStateUpdate(status=RunStatus.FAILED, run_meta=updated_run_meta)
 

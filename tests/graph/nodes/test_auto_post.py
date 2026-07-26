@@ -162,6 +162,50 @@ async def test_all_low_risk_actions_set_status_auto_posted(triage_state: TriageS
     assert update["status"] == RunStatus.AUTO_POSTED
 
 
+async def test_failed_post_appends_a_run_error_without_changing_status(
+    triage_state: TriageState,
+) -> None:
+    """A real GitHub-post failure (ActionExecutor.execute returning
+    PostOutcome.FAILED, not raising) must not be silently swallowed: status
+    still records the routing decision (documented, deliberate -- see
+    docs/agent/architecture-conventions.md), but run_meta.errors gains the
+    signal that reaches RunError/the node's Langfuse span."""
+    triage_state["draft"] = _draft([_comment_action(), _label_action()])
+    triage_state["risk_assessment"] = _risk([RiskLevel.LOW, RiskLevel.LOW])
+    action_executor = make_fake_action_executor()
+    action_executor.execute.side_effect = [
+        ActionPostResult(outcome=PostOutcome.POSTED, detail="comment-url"),
+        ActionPostResult(outcome=PostOutcome.FAILED, detail="GitHub API timed out"),
+    ]
+    node = make_fake_auto_post_node(action_executor=action_executor)
+
+    update = await node.execute(triage_state)
+
+    assert "status" in update
+    assert update["status"] == RunStatus.AUTO_POSTED
+    assert "run_meta" in update
+    run_meta = update["run_meta"]
+    assert run_meta is not None
+    assert len(run_meta.errors) == 1
+    assert run_meta.errors[0].node_name == node.name
+    assert "GitHub API timed out" in run_meta.errors[0].error_message
+
+
+async def test_no_failed_posts_leaves_run_meta_errors_empty(triage_state: TriageState) -> None:
+    triage_state["draft"] = _draft([_comment_action()])
+    triage_state["risk_assessment"] = _risk([RiskLevel.LOW])
+    action_executor = make_fake_action_executor()
+    action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
+    node = make_fake_auto_post_node(action_executor=action_executor)
+
+    update = await node.execute(triage_state)
+
+    assert "run_meta" in update
+    run_meta = update["run_meta"]
+    assert run_meta is not None
+    assert run_meta.errors == []
+
+
 async def test_raises_when_draft_or_risk_assessment_missing(triage_state: TriageState) -> None:
     node = make_fake_auto_post_node()
 

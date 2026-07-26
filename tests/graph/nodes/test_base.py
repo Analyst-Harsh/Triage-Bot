@@ -4,9 +4,11 @@ import pytest
 import structlog
 from structlog.testing import capture_logs
 
+import graph.nodes.base as base_module
 from graph.nodes.base import TriageNode
 from graph.nodes.node_names import NodeName
 from graph.state import TriageState, TriageStateUpdate
+from tests.graph.nodes.conftest import RecordingNodeSpan
 
 
 class _StubNode(TriageNode):
@@ -35,6 +37,31 @@ class _RaisingNode(TriageNode):
 
     async def execute(self, state: TriageState) -> TriageStateUpdate:  # noqa: ARG002
         raise ValueError("boom")
+
+
+class _NodeWithCost(TriageNode):
+    """A node whose execute() reports cost/cache-token usage, to exercise
+    the authoritative_* deltas __call__ attaches to its node span."""
+
+    name: ClassVar[NodeName] = NodeName.RISK_CHECK
+
+    async def execute(self, state: TriageState) -> TriageStateUpdate:
+        updated = state["run_meta"].with_usage(cost_usd=0.05, cache_read_tokens=200)
+        return TriageStateUpdate(run_meta=updated)
+
+
+class _NodeWithNewError(TriageNode):
+    """A node whose execute() appends a RunError without raising -- e.g.
+    AutoPostNode/ApprovalQueueNode on a real GitHub post failure -- to
+    exercise __call__'s level="ERROR" span enrichment."""
+
+    name: ClassVar[NodeName] = NodeName.AUTO_POST
+
+    async def execute(self, state: TriageState) -> TriageStateUpdate:
+        updated = state["run_meta"].with_error(
+            node_name=self.name, error_message="2 action(s) failed to post"
+        )
+        return TriageStateUpdate(run_meta=updated)
 
 
 async def test_call_bumps_iteration_count_on_success(triage_state: TriageState) -> None:
@@ -94,6 +121,80 @@ async def test_call_logs_node_finished_with_duration(triage_state: TriageState) 
     assert finished["node"] == NodeName.PLANNER
     assert isinstance(finished["duration_ms"], float)
     assert finished["duration_ms"] >= 0
+
+
+async def test_call_wraps_execute_in_a_node_span_named_after_the_node(
+    triage_state: TriageState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recording = RecordingNodeSpan()
+    monkeypatch.setattr(base_module, "node_span", recording)
+    node = _StubNode()
+
+    await node(triage_state)
+
+    assert len(recording.spans) == 1
+    assert recording.spans[0].name == NodeName.PLANNER
+
+
+async def test_call_enriches_node_span_with_duration_and_authoritative_cost(
+    triage_state: TriageState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recording = RecordingNodeSpan()
+    monkeypatch.setattr(base_module, "node_span", recording)
+    node = _NodeWithCost()
+
+    await node(triage_state)
+
+    span = recording.spans[0]
+    assert len(span.update_calls) == 1
+    metadata = span.update_calls[0]["metadata"]
+    assert isinstance(metadata["duration_ms"], float)
+    assert metadata["duration_ms"] >= 0
+    assert metadata["authoritative_cost_usd_delta"] == pytest.approx(0.05)
+    assert metadata["authoritative_cache_read_tokens_delta"] == 200
+
+
+async def test_call_marks_span_error_level_when_execute_appends_a_run_error_without_raising(
+    triage_state: TriageState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recording = RecordingNodeSpan()
+    monkeypatch.setattr(base_module, "node_span", recording)
+    node = _NodeWithNewError()
+
+    await node(triage_state)
+
+    span = recording.spans[0]
+    update_call = span.update_calls[0]
+    assert update_call["level"] == "ERROR"
+    assert update_call["status_message"] == "2 action(s) failed to post"
+    assert update_call["metadata"]["new_error_count"] == 1
+
+
+async def test_call_leaves_span_level_default_when_no_new_errors(
+    triage_state: TriageState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recording = RecordingNodeSpan()
+    monkeypatch.setattr(base_module, "node_span", recording)
+    node = _StubNode()
+
+    await node(triage_state)
+
+    span = recording.spans[0]
+    update_call = span.update_calls[0]
+    assert update_call["level"] is None
+    assert update_call["status_message"] is None
+    assert "new_error_count" not in update_call["metadata"]
+
+
+async def test_call_does_not_raise_when_tracing_is_unconfigured(
+    triage_state: TriageState,
+) -> None:
+    """The real (unconfigured, in every test's default Settings) `node_span`
+    yields `None` -- `__call__` must guard on that rather than assume a span
+    always exists."""
+    node = _StubNode()
+
+    await node(triage_state)
 
 
 async def test_call_unbinds_context_after_completion(triage_state: TriageState) -> None:

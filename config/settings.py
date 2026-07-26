@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     # deeper, namespaced per repo underneath it.
     episodic_memory_namespace_prefix: tuple[str, ...] = ("episodes",)
 
+    # Langfuse tracing (observability/tracing.py). Unset by default -- same
+    # optional-feature pattern as episodic memory: every trace-emitting call
+    # degrades to a no-op without both keys present, rather than requiring
+    # this to run at all.
+    langfuse_public_key: SecretStr | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_host: str = "https://cloud.langfuse.com"
+
 
 @lru_cache
 def get_settings() -> Settings:

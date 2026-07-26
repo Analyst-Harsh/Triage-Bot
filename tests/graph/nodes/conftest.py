@@ -1,3 +1,5 @@
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import create_autospec
@@ -160,6 +162,36 @@ def make_fake_chat_model(
         fail_parse_times=fail_parse_times,
         raise_validation_error_times=raise_validation_error_times,
     )
+
+
+class FakeLangfuseSpan:
+    """Test double for a Langfuse span (`observability.tracing.node_span`'s
+    yielded value), recording every `.update()` call -- lets a test assert on
+    the enrichment `TriageNode.__call__`/`AgentSubgraph.assemble_node` apply,
+    without a real Langfuse client configured."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.update_calls: list[dict[str, Any]] = []
+
+    def update(self, **kwargs: Any) -> None:
+        self.update_calls.append(kwargs)
+
+
+class RecordingNodeSpan:
+    """Test double for `observability.tracing.node_span` itself: records
+    every span it creates (in call order) so a test can inspect
+    `.update_calls` after the node has run, via
+    `monkeypatch.setattr(<module>, "node_span", RecordingNodeSpan())`."""
+
+    def __init__(self) -> None:
+        self.spans: list[FakeLangfuseSpan] = []
+
+    @asynccontextmanager
+    async def __call__(self, name: str) -> AsyncGenerator[FakeLangfuseSpan]:
+        span = FakeLangfuseSpan(name)
+        self.spans.append(span)
+        yield span
 
 
 class _FakePlannerNode(PlannerNode):

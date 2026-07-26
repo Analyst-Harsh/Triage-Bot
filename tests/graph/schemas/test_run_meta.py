@@ -110,3 +110,33 @@ def test_deserializes_without_cache_fields_for_backward_compatibility() -> None:
 
     assert restored.cache_read_tokens == 0
     assert restored.cache_creation_tokens == 0
+
+
+def test_with_error_appends_a_run_error() -> None:
+    meta = make_run_meta()
+
+    updated = meta.with_error(node_name="auto_post", error_message="GitHub API timed out")
+
+    assert len(updated.errors) == 1
+    assert updated.errors[0].node_name == "auto_post"
+    assert updated.errors[0].error_message == "GitHub API timed out"
+    # Original is untouched (model_copy semantics).
+    assert meta.errors == []
+
+
+def test_with_error_preserves_existing_errors() -> None:
+    meta = make_run_meta(
+        errors=[
+            RunError(
+                node_name="researcher",
+                error_message="Tavily API timed out",
+                occurred_at=datetime.now(UTC),
+            )
+        ]
+    )
+
+    updated = meta.with_error(node_name="auto_post", error_message="GitHub API timed out")
+
+    assert len(updated.errors) == 2
+    assert updated.errors[0].node_name == "researcher"
+    assert updated.errors[1].node_name == "auto_post"

@@ -339,6 +339,61 @@ async def test_mixed_decisions_set_status_approved_and_posted(
     assert update["status"] == RunStatus.APPROVED_AND_POSTED
 
 
+async def test_failed_post_appends_a_run_error_without_changing_status(
+    triage_state: TriageState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real GitHub-post failure (ActionExecutor.execute returning
+    PostOutcome.FAILED, not raising) must not be silently swallowed: status
+    still records the human's approval decision (documented, deliberate --
+    see docs/agent/architecture-conventions.md), but run_meta.errors gains
+    the signal that reaches RunError/the node's Langfuse span."""
+    _set_up_queued_state(
+        triage_state,
+        actions=[_comment_action()],
+        risk_levels=[RiskLevel.MEDIUM],
+        outcomes=[PostOutcome.QUEUED],
+    )
+    _stub_interrupt_returning(monkeypatch, {"decisions": [{"index": 0, "approved": True}]})
+    action_executor = make_fake_action_executor()
+    action_executor.execute.return_value = ActionPostResult(
+        outcome=PostOutcome.FAILED, detail="GitHub API timed out"
+    )
+    node = make_fake_approval_queue_node(action_executor=action_executor)
+
+    update = await node.execute(triage_state)
+
+    assert "status" in update
+    assert update["status"] == RunStatus.APPROVED_AND_POSTED
+    assert "run_meta" in update
+    run_meta = update["run_meta"]
+    assert run_meta is not None
+    assert len(run_meta.errors) == 1
+    assert run_meta.errors[0].node_name == node.name
+    assert "GitHub API timed out" in run_meta.errors[0].error_message
+
+
+async def test_no_failed_posts_leaves_run_meta_errors_empty(
+    triage_state: TriageState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _set_up_queued_state(
+        triage_state,
+        actions=[_comment_action()],
+        risk_levels=[RiskLevel.MEDIUM],
+        outcomes=[PostOutcome.QUEUED],
+    )
+    _stub_interrupt_returning(monkeypatch, {"decisions": [{"index": 0, "approved": True}]})
+    action_executor = make_fake_action_executor()
+    action_executor.execute.return_value = ActionPostResult(outcome=PostOutcome.POSTED)
+    node = make_fake_approval_queue_node(action_executor=action_executor)
+
+    update = await node.execute(triage_state)
+
+    assert "run_meta" in update
+    run_meta = update["run_meta"]
+    assert run_meta is not None
+    assert run_meta.errors == []
+
+
 async def test_dry_run_and_run_id_are_passed_to_executor(
     triage_state: TriageState, monkeypatch: pytest.MonkeyPatch
 ) -> None:

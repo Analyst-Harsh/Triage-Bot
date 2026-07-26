@@ -156,6 +156,37 @@ def test_create_initial_state_defaults() -> None:
     assert state["run_meta"].cache_creation_tokens == 0
 
 
+def test_create_initial_state_threads_trace_id_into_run_meta() -> None:
+    issue = make_issue()
+
+    state = create_initial_state(
+        issue, max_iterations=10, max_cost_usd=1.0, trace_id="deadbeef" * 4
+    )
+
+    assert state["run_meta"].trace_id == "deadbeef" * 4
+
+
+def test_create_initial_state_defaults_trace_id_to_none() -> None:
+    issue = make_issue()
+
+    state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
+
+    assert state["run_meta"].trace_id is None
+
+
+def test_checkpoint_serde_round_trip_on_initial_state_with_trace_id() -> None:
+    issue = make_issue()
+    state = create_initial_state(
+        issue, max_iterations=10, max_cost_usd=1.0, trace_id="deadbeef" * 4
+    )
+
+    serializer = JsonPlusSerializer()
+    type_, payload = serializer.dumps_typed(state)
+    restored = serializer.loads_typed((type_, payload))
+
+    assert restored == state
+
+
 def test_checkpoint_serde_round_trip_on_initial_state() -> None:
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
