@@ -5,15 +5,15 @@
 | Name                                            |    Stmts |     Miss |   Cover |   Missing |
 |------------------------------------------------ | -------: | -------: | ------: | --------: |
 | config/\_\_init\_\_.py                          |        2 |        0 |    100% |           |
-| config/settings.py                              |       34 |        0 |    100% |           |
+| config/settings.py                              |       37 |        0 |    100% |           |
 | graph/\_\_init\_\_.py                           |        0 |        0 |    100% |           |
-| graph/builder.py                                |       40 |        0 |    100% |           |
+| graph/builder.py                                |       38 |        0 |    100% |           |
 | graph/checkpointer.py                           |       15 |        0 |    100% |           |
 | graph/nodes/\_\_init\_\_.py                     |       12 |        0 |    100% |           |
-| graph/nodes/agent\_subgraph.py                  |       86 |        8 |     91% |126-130, 138, 148, 173 |
-| graph/nodes/approval\_queue.py                  |       59 |        1 |     98% |       104 |
-| graph/nodes/auto\_post.py                       |       40 |        3 |     92% | 39-40, 81 |
-| graph/nodes/base.py                             |       23 |        1 |     96% |        68 |
+| graph/nodes/agent\_subgraph.py                  |       90 |        8 |     91% |127-131, 139, 149, 174 |
+| graph/nodes/approval\_queue.py                  |       62 |        1 |     98% |       118 |
+| graph/nodes/auto\_post.py                       |       43 |        3 |     93% | 39-40, 95 |
+| graph/nodes/base.py                             |       28 |        1 |     96% |       100 |
 | graph/nodes/drafter.py                          |       77 |        3 |     96% |99-100, 270 |
 | graph/nodes/llm\_node.py                        |       18 |        3 |     83% |     36-38 |
 | graph/nodes/node\_names.py                      |        8 |        0 |    100% |           |
@@ -40,7 +40,7 @@
 | graph/schemas/post\_result.py                   |        7 |        0 |    100% |           |
 | graph/schemas/research.py                       |       23 |        0 |    100% |           |
 | graph/schemas/risk.py                           |       12 |        0 |    100% |           |
-| graph/schemas/run\_meta.py                      |       15 |        0 |    100% |           |
+| graph/schemas/run\_meta.py                      |       17 |        0 |    100% |           |
 | graph/schemas/sandbox.py                        |        5 |        0 |    100% |           |
 | graph/state.py                                  |        9 |        0 |    100% |           |
 | llm/\_\_init\_\_.py                             |        6 |        0 |    100% |           |
@@ -49,9 +49,10 @@
 | llm/pricing.py                                  |       14 |        0 |    100% |           |
 | llm/result.py                                   |        5 |        0 |    100% |           |
 | llm/structured.py                               |       43 |        1 |     98% |        81 |
-| main.py                                         |       80 |       28 |     65% |46-49, 64-70, 120-179, 188 |
+| main.py                                         |       84 |       31 |     63% |52-55, 70-76, 126-214, 223 |
 | observability/\_\_init\_\_.py                   |        0 |        0 |    100% |           |
 | observability/logging\_config.py                |       21 |        0 |    100% |           |
+| observability/tracing.py                        |       38 |        7 |     82% |154-168, 189-190 |
 | prompts/\_\_init\_\_.py                         |        2 |        0 |    100% |           |
 | prompts/drafter.py                              |       80 |        0 |    100% |           |
 | prompts/planner.py                              |       15 |        0 |    100% |           |
@@ -64,7 +65,7 @@
 | utils/diff\_applier.py                          |      105 |        8 |     92% |35, 51, 67-68, 90, 96, 116, 200 |
 | utils/episodic\_memory\_store.py                |       68 |       10 |     85% |68, 82, 226-244 |
 | utils/github\_client.py                         |       71 |        1 |     99% |       148 |
-| **TOTAL**                                       | **1938** |   **97** | **95%** |           |
+| **TOTAL**                                       | **1998** |  **107** | **95%** |           |
 
 
 ## Setup coverage badge
