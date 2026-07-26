@@ -5,6 +5,7 @@ from langgraph.errors import NodeError
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from graph.errors import BudgetExceededError
 from graph.nodes import (
     ApprovalQueueNode,
     AutoPostNode,
@@ -12,7 +13,9 @@ from graph.nodes import (
     PlannerNode,
     ResearcherSubgraph,
     RiskCheckNode,
+    SpamRejectedNode,
     route_after_auto_post,
+    route_after_planner,
 )
 from graph.schemas import RunStatus
 from graph.state import TriageState, TriageStateUpdate
@@ -25,15 +28,32 @@ log = structlog.get_logger(__name__)
 def handle_node_error(state: TriageState, error: NodeError) -> TriageStateUpdate:
     """Graph-wide error handler (see `set_node_defaults` below): converts
     any node's uncaught exception into a `RunError` + `status=FAILED`
-    update, rather than crashing the run."""
-    log.error(
-        "node_failed",
-        node=error.node,
-        error=str(error.error),
-        run_id=str(state["run_meta"].run_id),
-        thread_id=state["run_meta"].thread_id,
-        exc_info=error.error,
-    )
+    update, rather than crashing the run.
+
+    `BudgetExceededError` (`graph/errors.py`) goes through this exact same
+    conversion -- deliberately not a special propagation path -- but logs a
+    distinct `budget_exceeded` event first, so a cost/iteration-budget abort
+    is never confused with a real application bug when scanning traces/logs
+    for `node_failed` events."""
+    if isinstance(error.error, BudgetExceededError):
+        log.error(
+            "budget_exceeded",
+            node=error.node,
+            dimension=error.error.dimension,
+            current=error.error.current,
+            limit=error.error.limit,
+            run_id=str(state["run_meta"].run_id),
+            thread_id=state["run_meta"].thread_id,
+        )
+    else:
+        log.error(
+            "node_failed",
+            node=error.node,
+            error=str(error.error),
+            run_id=str(state["run_meta"].run_id),
+            thread_id=state["run_meta"].thread_id,
+            exc_info=error.error,
+        )
     updated_run_meta = state["run_meta"].with_error(
         node_name=error.node, error_message=str(error.error)
     )
@@ -49,10 +69,14 @@ def build_graph(
     memory_store: BaseEpisodicMemoryStore | None = None,
 ) -> CompiledStateGraph[TriageState]:
     """Wires the Planner -> Researcher -> Drafter -> Risk check -> Auto-post
-    pipeline. From `auto_post`, `route_after_auto_post` conditionally routes
-    to `approval_queue` only when at least one drafted action was left
-    queued (non-LOW risk); an all-LOW-risk run ends right after `auto_post`
-    instead.
+    pipeline. From `planner`, `route_after_planner` conditionally routes a
+    `SPAM_OR_ABUSE`-classified issue straight to `spam_rejected` (a graceful
+    terminal outcome, `status=REJECTED`) instead of continuing into
+    Researcher/Drafter/RiskCheck/AutoPost; every other `IssueType` continues
+    to `researcher` as before. From `auto_post`, `route_after_auto_post`
+    conditionally routes to `approval_queue` only when at least one drafted
+    action was left queued (non-LOW risk); an all-LOW-risk run ends right
+    after `auto_post` instead.
 
     Stays synchronous and does no I/O: `researcher_tools`/`drafter_tools`
     (MCP/Tavily tools, inherently async to load) are injected by the
@@ -75,10 +99,11 @@ def build_graph(
     manager -- the underlying `AsyncPostgresStore` connection pool needs real
     open/close lifecycle, unlike `GitHubClient`'s singleton) and defaults to
     a `NullEpisodicMemoryStore()` no-op when omitted. It's threaded into
-    `PlannerNode` (reads similar past
-    episodes), `AutoPostNode`, and `ApprovalQueueNode` (each writes a
-    completed run's outcome back) -- no new nodes or edges for episodic
-    memory.
+    `PlannerNode` (reads similar past episodes), `AutoPostNode`,
+    `ApprovalQueueNode`, and `SpamRejectedNode` (each writes a completed
+    run's outcome back, `SpamRejectedNode` with `draft_actions=[]`/
+    `risk_assessment=None`/`post_results=None` since a spam-rejected run
+    never reaches drafting).
 
     Every simple node here is a `TriageNode` (see `graph/nodes/base.py`).
     The Researcher and the Drafter are `AgentSubgraph`s instead — their own
@@ -95,6 +120,7 @@ def build_graph(
     # Nodes
     memory_store = memory_store or NullEpisodicMemoryStore()
     planner = PlannerNode(memory_store)
+    spam_rejected = SpamRejectedNode(memory_store)
     researcher = ResearcherSubgraph(researcher_tools or [])
     drafter = DrafterSubgraph(drafter_tools or [], sandbox_handle=drafter_sandbox_handle)
     risk_check = RiskCheckNode()
@@ -107,11 +133,15 @@ def build_graph(
     workflow.add_node(planner.name, planner)  # pyright: ignore[reportUnknownMemberType]
     workflow.add_node(researcher.name, researcher.compile())  # pyright: ignore[reportUnknownMemberType]
     workflow.add_node(drafter.name, drafter.compile())  # pyright: ignore[reportUnknownMemberType]
-    for node in (risk_check, auto_post, approval_queue):
+    for node in (spam_rejected, risk_check, auto_post, approval_queue):
         workflow.add_node(node.name, node)  # pyright: ignore[reportUnknownMemberType]
 
     workflow.add_edge(START, planner.name)
-    workflow.add_edge(planner.name, researcher.name)
+
+    # Short circuit SPAM_OR_ABUSE issues straight to spam_rejected
+    workflow.add_conditional_edges(planner.name, route_after_planner)  # pyright: ignore[reportUnknownMemberType]
+    workflow.add_edge(spam_rejected.name, END)
+
     workflow.add_edge(researcher.name, drafter.name)
     workflow.add_edge(drafter.name, risk_check.name)
     workflow.add_edge(risk_check.name, auto_post.name)

@@ -14,8 +14,10 @@ from structlog.testing import capture_logs
 
 import graph.nodes.drafter as drafter_module
 from config.settings import Settings
+from graph.errors import BudgetExceededError
 from graph.nodes.agent_subgraph import AgentLoopState
 from graph.nodes.drafter import DrafterSubgraph
+from graph.nodes.node_names import NodeName
 from graph.schemas import (
     CodeFixAction,
     CodeFixIntent,
@@ -35,7 +37,13 @@ from graph.state import TriageState, create_initial_state
 from llm.pricing import estimate_cost_usd
 from llm.result import LLMResult
 from tests.graph.nodes.conftest import make_fake_chat_model, make_issue
-from tools.sandbox import MAX_SANDBOX_FIX_ATTEMPTS, SandboxHandle
+from tools.sandbox import SandboxHandle
+
+# Any positive count works for this file's tests (they only synthesize N
+# already-recorded attempts; none of them exercise SandboxHandle's own
+# cap-enforcement path, which is tests/tools/test_sandbox.py's job) --
+# matches GuardrailSettings.sandbox_max_fix_attempts's production default.
+_FIX_ATTEMPT_COUNT = 6
 
 
 def make_planner_output(**overrides: object) -> PlannerOutput:
@@ -105,6 +113,8 @@ class _FakeDrafterSubgraph(DrafterSubgraph):
         sandbox_handle: SandboxHandle | None = None,
     ) -> None:
         self._tools = []
+        self.max_tool_calls = 50
+        self._structured_output_max_attempts = 2
         self._primary_model = primary_model
         self._fallback_model = fallback_model
         self._sandbox_handle = sandbox_handle
@@ -183,6 +193,33 @@ def test_prepare_never_short_circuits() -> None:
 
     assert result is not None
     assert len(result) == 1
+
+
+async def test_finalize_raises_budget_exceeded_before_grounding_check_call() -> None:
+    """The grounding self-check is a second, independent LLM call that
+    neither `prepare_node`'s entry check nor `BudgetGuardMiddleware` (which
+    only wraps the create_agent loop) ever sees coming -- this proves
+    `finalize()` re-checks on its own, before that call is made."""
+    primary = make_fake_chat_model(
+        model_name="gpt-4o-mini",
+        parsed_results_by_schema={
+            DraftProposal: make_proposal(),
+            GroundingCritique: GroundingCritique(),
+        },
+    )
+    fallback = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
+    node = _FakeDrafterSubgraph(primary, fallback)
+    state = make_state(make_planner_output(), make_research_findings())
+    state["run_meta"] = state["run_meta"].model_copy(
+        update={"estimated_cost_usd": state["run_meta"].max_cost_usd}
+    )
+
+    with pytest.raises(BudgetExceededError) as exc_info:
+        await node.finalize(make_proposal(), [], state)
+
+    assert exc_info.value.node_name == NodeName.DRAFTER
+    assert exc_info.value.dimension == "cost_usd"
+    assert primary.received_messages == []
 
 
 async def test_finalize_raises_when_summary_is_none() -> None:
@@ -369,7 +406,7 @@ def test_resolve_code_fix_intent_no_warning_when_budget_genuinely_exhausted() ->
                 passed=False, logs="1 failed", test_command="pytest", duration_seconds=1.0
             ),
         )
-        for i in range(MAX_SANDBOX_FIX_ATTEMPTS)
+        for i in range(_FIX_ATTEMPT_COUNT)
     ]
     handle = make_sandbox_handle()
     handle.attempts = failing_attempts
@@ -603,6 +640,8 @@ async def test_finalize_grounding_check_excludes_fallback_comment_text(
         fallback: BaseChatModel,  # noqa: ARG001
         messages: Sequence[BaseMessage],
         schema: type[object],  # noqa: ARG001
+        *,
+        max_attempts: int,  # noqa: ARG001
     ) -> LLMResult[GroundingCritique]:
         captured_draft_texts.append(str(messages[-1].content))
         return LLMResult(

@@ -3,11 +3,13 @@ from functools import lru_cache
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from config.guardrail_settings import GuardrailSettings
+
 
 class Settings(BaseSettings):
     """Secrets and ops-tunable infra values only."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_nested_delimiter="__")
 
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
@@ -15,13 +17,12 @@ class Settings(BaseSettings):
     tavily_api_key: SecretStr | None = None
     e2b_api_key: SecretStr | None = None
 
-    llm_request_timeout_seconds: float = 30.0
-    llm_max_retries: int = 2
+    # Every tool-call/attempt/budget cap, plus the timeout/retry/E2B-budget
+    # fields formerly listed directly here, lives under this one namespace --
+    # see `GuardrailSettings`' own docstring for why. Env override example:
+    # `GUARDRAILS__RESEARCHER_MAX_TOOL_CALLS=8` (env_nested_delimiter="__" above).
+    guardrails: GuardrailSettings = GuardrailSettings()
 
-    e2b_sandbox_session_timeout_seconds: float = 900.0
-    e2b_install_timeout_seconds: float = 300.0
-    e2b_test_command_timeout_seconds: float = 180.0
-    e2b_max_billed_seconds_per_run: float = 600.0
     e2b_cost_per_second_usd: float = 0.000028
     e2b_restrict_network: bool = True
 

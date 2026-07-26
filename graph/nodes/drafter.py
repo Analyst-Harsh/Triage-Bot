@@ -6,8 +6,10 @@ from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
+from config.settings import get_settings
 from graph.nodes.agent_subgraph import AgentSubgraph
 from graph.nodes.node_names import NodeName
+from graph.nodes.utils.budget_guard import check_budget
 from graph.schemas import (
     CodeFixAction,
     CodeFixIntent,
@@ -34,12 +36,6 @@ from prompts.drafter import (
 from tools.sandbox import SandboxHandle
 
 log = structlog.get_logger(__name__)
-
-# Global Constraints value: exploration budget to discover language/manifest/
-# test command (4) + dependency install (2) + baseline run_tests (1) + repro
-# write+run (2) + 3 fix cycles x (read+edit+run, budget 4 each = 12) = 21,
-# rounded up for margin.
-DRAFTER_MAX_TOOL_CALLS = 50
 
 
 class DrafterSubgraph(AgentSubgraph[DraftProposal]):
@@ -78,11 +74,6 @@ class DrafterSubgraph(AgentSubgraph[DraftProposal]):
         primary=LLMEndpointConfig(provider="openai", model="gpt-5.4-nano", temperature=0.0),
         fallback=LLMEndpointConfig(provider="openai", model="gpt-5-nano", temperature=0.0),
     )
-    # Inert until the sandboxed code-fix path adds real tools -- `tools=[]`
-    # today means this cap is unreachable. Left non-zero (rather than 0) so
-    # `assemble_node`'s `cap_hit = len(tool_calls) >= max_tool_calls` doesn't
-    # log a false "cap hit" on every run.
-    max_tool_calls: ClassVar[int] = DRAFTER_MAX_TOOL_CALLS
     summary_schema: ClassVar[type[BaseModel]] = DraftProposal
 
     def __init__(
@@ -96,7 +87,13 @@ class DrafterSubgraph(AgentSubgraph[DraftProposal]):
         default) means no sandbox this run -- the same "no tools" case that
         already made `tools=[]` the common case before this class had a
         code-fix path at all."""
-        super().__init__(tools)
+        # Inert until the sandboxed code-fix path adds real tools -- `tools=[]`
+        # today means this cap is unreachable. Non-zero (rather than 0) so
+        # `assemble_node`'s `cap_hit = len(tool_calls) >= max_tool_calls` doesn't
+        # log a false "cap hit" on every run. See
+        # `GuardrailSettings.drafter_max_tool_calls`'s docstring for how its
+        # default value was derived.
+        super().__init__(tools, max_tool_calls=get_settings().guardrails.drafter_max_tool_calls)
         self._sandbox_handle = sandbox_handle
 
     def system_prompt(self) -> str:
@@ -199,13 +196,22 @@ class DrafterSubgraph(AgentSubgraph[DraftProposal]):
 
         # Independent second LLM call: the grounding self-check. See class
         # docstring for why this must be a genuinely separate pass rather
-        # than a second field on the call that produced `summary`.
+        # than a second field on the call that produced `summary`. Neither
+        # `prepare_node`'s entry check nor `BudgetGuardMiddleware` (which only
+        # wraps the create_agent loop) ever sees this call coming -- re-check
+        # immediately before it, the same way `summarize_node` re-checks
+        # before its own post-loop call.
+        check_budget(state["run_meta"], node_name=self.name)
         critique_messages = GROUNDING_CHECK_PROMPT.format_messages(
             draft_text=public_draft_text,
             evidence=format_evidence_for_prompt(research_findings.evidence),
         )
         critique_result = await call_structured(
-            self._primary_model, self._fallback_model, critique_messages, GroundingCritique
+            self._primary_model,
+            self._fallback_model,
+            critique_messages,
+            GroundingCritique,
+            max_attempts=self._structured_output_max_attempts,
         )
 
         draft = DraftOutput(

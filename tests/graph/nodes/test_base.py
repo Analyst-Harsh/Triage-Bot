@@ -5,6 +5,7 @@ import structlog
 from structlog.testing import capture_logs
 
 import graph.nodes.base as base_module
+from graph.errors import BudgetExceededError
 from graph.nodes.base import TriageNode
 from graph.nodes.node_names import NodeName
 from graph.state import TriageState, TriageStateUpdate
@@ -62,6 +63,51 @@ class _NodeWithNewError(TriageNode):
             node_name=self.name, error_message="2 action(s) failed to post"
         )
         return TriageStateUpdate(run_meta=updated)
+
+
+class _CountingNode(TriageNode):
+    """Tracks whether execute() actually ran, to prove check_budget's
+    placement gates it rather than merely running alongside it."""
+
+    name: ClassVar[NodeName] = NodeName.PLANNER
+
+    def __init__(self) -> None:
+        self.execute_calls = 0
+
+    async def execute(self, state: TriageState) -> TriageStateUpdate:  # noqa: ARG002
+        self.execute_calls += 1
+        return TriageStateUpdate()
+
+
+async def test_call_raises_budget_exceeded_before_execute_when_cost_already_at_ceiling(
+    triage_state: TriageState,
+) -> None:
+    triage_state["run_meta"] = triage_state["run_meta"].model_copy(
+        update={"estimated_cost_usd": triage_state["run_meta"].max_cost_usd}
+    )
+    node = _CountingNode()
+
+    with pytest.raises(BudgetExceededError) as exc_info:
+        await node(triage_state)
+
+    assert node.execute_calls == 0
+    assert exc_info.value.node_name == NodeName.PLANNER
+    assert exc_info.value.dimension == "cost_usd"
+
+
+async def test_call_raises_budget_exceeded_before_execute_when_iterations_already_at_ceiling(
+    triage_state: TriageState,
+) -> None:
+    triage_state["run_meta"] = triage_state["run_meta"].model_copy(
+        update={"iteration_count": triage_state["run_meta"].max_iterations}
+    )
+    node = _CountingNode()
+
+    with pytest.raises(BudgetExceededError) as exc_info:
+        await node(triage_state)
+
+    assert node.execute_calls == 0
+    assert exc_info.value.dimension == "iterations"
 
 
 async def test_call_bumps_iteration_count_on_success(triage_state: TriageState) -> None:

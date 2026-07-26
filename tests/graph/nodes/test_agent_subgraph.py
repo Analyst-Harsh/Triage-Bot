@@ -13,8 +13,10 @@ from pydantic import BaseModel
 from structlog.testing import capture_logs
 
 import graph.nodes.agent_subgraph as agent_subgraph_module
+from graph.errors import BudgetExceededError
 from graph.nodes.agent_subgraph import AgentLoopState, AgentSubgraph
 from graph.nodes.node_names import NodeName
+from graph.nodes.utils.budget_guard_middleware import BudgetGuardMiddleware
 from graph.schemas import ToolCallRecord
 from graph.state import TriageState, TriageStateUpdate
 from llm.config import LLMEndpointConfig, NodeLLMConfig
@@ -41,7 +43,6 @@ class _StubAgentSubgraph(AgentSubgraph[_StubSummary]):
         primary=LLMEndpointConfig(provider="anthropic", model="claude-haiku-4-5-20251001"),
         fallback=LLMEndpointConfig(provider="openai", model="gpt-4o-mini"),
     )
-    max_tool_calls: ClassVar[int] = 3
     summary_schema: ClassVar[type[BaseModel]] = _StubSummary
 
     def __init__(
@@ -51,6 +52,8 @@ class _StubAgentSubgraph(AgentSubgraph[_StubSummary]):
         prepare_result: list[BaseMessage] | None = None,
     ) -> None:
         self._tools = []
+        self.max_tool_calls = 3
+        self._structured_output_max_attempts = 2
         self._primary_model = primary_model
         self._fallback_model = fallback_model
         self._prepare_result = prepare_result
@@ -102,6 +105,33 @@ def make_loop_state(
         summarize_cache_read_tokens=summarize_cache_read_tokens,
         summarize_cache_creation_tokens=summarize_cache_creation_tokens,
     )
+
+
+def test_prepare_node_raises_budget_exceeded_before_prepare_when_already_over_budget(
+    triage_state: TriageState,
+) -> None:
+    class _CountingStubAgentSubgraph(_StubAgentSubgraph):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+            self.prepare_calls = 0
+
+        def prepare(self, state: TriageState) -> list[BaseMessage] | None:
+            self.prepare_calls += 1
+            return super().prepare(state)
+
+    primary = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
+    fallback = make_fake_chat_model(model_name="gpt-4o-mini")
+    node = _CountingStubAgentSubgraph(primary, fallback)
+    triage_state["run_meta"] = triage_state["run_meta"].model_copy(
+        update={"estimated_cost_usd": triage_state["run_meta"].max_cost_usd}
+    )
+
+    with pytest.raises(BudgetExceededError) as exc_info:
+        node.prepare_node(make_loop_state(triage_state))
+
+    assert node.prepare_calls == 0
+    assert exc_info.value.node_name == NodeName.RESEARCHER
+    assert exc_info.value.dimension == "cost_usd"
 
 
 def test_prepare_node_with_none_short_circuits(triage_state: TriageState) -> None:
@@ -296,6 +326,27 @@ async def test_assemble_node_enriches_span_with_authoritative_usage_metadata(
     assert metadata["cap_hit"] is False
 
 
+async def test_summarize_node_raises_budget_exceeded_before_calling_model(
+    triage_state: TriageState,
+) -> None:
+    """`summarize_node`'s LLM call sits outside both `prepare_node`'s entry
+    check and `BudgetGuardMiddleware` (which only wraps the create_agent
+    loop) -- this proves it re-checks on its own, before the model is ever
+    called."""
+    node = make_node()
+    triage_state["run_meta"] = triage_state["run_meta"].model_copy(
+        update={"estimated_cost_usd": triage_state["run_meta"].max_cost_usd}
+    )
+    state = make_loop_state(triage_state, messages=[])
+
+    with pytest.raises(BudgetExceededError) as exc_info:
+        await node.summarize_node(state)
+
+    assert exc_info.value.node_name == NodeName.RESEARCHER
+    assert exc_info.value.dimension == "cost_usd"
+    assert node._primary_model.received_messages == []  # pyright: ignore[reportPrivateUsage]
+
+
 async def test_summarize_node_parses_structured_output(triage_state: TriageState) -> None:
     node = make_node()
     state = make_loop_state(triage_state, messages=[])
@@ -351,14 +402,15 @@ async def test_assemble_node_records_previously_dangling_tool_call(
 # ---------------------------------------------------------------------------
 
 
-def test_middleware_order_is_context_editing_then_tool_call_limit_then_fallback() -> None:
+def test_middleware_order_starts_budget_guard_then_context_editing() -> None:
     node = make_node()
 
     middleware = node._middleware()  # pyright: ignore[reportPrivateUsage]
 
-    assert isinstance(middleware[0], ContextEditingMiddleware)
-    assert isinstance(middleware[1], ToolCallLimitMiddleware)
-    assert isinstance(middleware[2], ModelFallbackMiddleware)
+    assert isinstance(middleware[0], BudgetGuardMiddleware)
+    assert isinstance(middleware[1], ContextEditingMiddleware)
+    assert isinstance(middleware[2], ToolCallLimitMiddleware)
+    assert isinstance(middleware[3], ModelFallbackMiddleware)
 
 
 def test_middleware_context_editing_uses_expected_constants() -> None:
@@ -366,7 +418,7 @@ def test_middleware_context_editing_uses_expected_constants() -> None:
 
     middleware = node._middleware()  # pyright: ignore[reportPrivateUsage]
 
-    context_editing = middleware[0]
+    context_editing = middleware[1]
     assert isinstance(context_editing, ContextEditingMiddleware)
     edit = context_editing.edits[0]
     assert isinstance(edit, ClearToolUsesEdit)
@@ -387,7 +439,7 @@ def test_middleware_context_editing_respects_subclass_override() -> None:
     fallback = make_fake_chat_model(model_name="gpt-4o-mini")
     node = _OverriddenStubAgentSubgraph(primary, fallback)
 
-    context_editing = node._middleware()[0]  # pyright: ignore[reportPrivateUsage]
+    context_editing = node._middleware()[1]  # pyright: ignore[reportPrivateUsage]
     assert isinstance(context_editing, ContextEditingMiddleware)
     edit = context_editing.edits[0]
     assert isinstance(edit, ClearToolUsesEdit)

@@ -13,7 +13,7 @@ async def test_call_structured_returns_parsed_result_from_primary() -> None:
     primary = make_fake_chat_model(model_name="primary-model", parsed_result=_Answer(value="ok"))
     fallback = make_fake_chat_model(model_name="fallback-model")
 
-    result = await call_structured(primary, fallback, [], _Answer)
+    result = await call_structured(primary, fallback, [], _Answer, max_attempts=2)
 
     assert result.parsed == _Answer(value="ok")
     assert result.models_invoked == ["primary-model"]
@@ -25,7 +25,7 @@ async def test_call_structured_falls_back_on_primary_failure() -> None:
         model_name="fallback-model", parsed_result=_Answer(value="from fallback")
     )
 
-    result = await call_structured(primary, fallback, [], _Answer)
+    result = await call_structured(primary, fallback, [], _Answer, max_attempts=2)
 
     assert result.parsed == _Answer(value="from fallback")
     assert result.models_invoked == ["fallback-model"]
@@ -41,7 +41,7 @@ async def test_call_structured_retries_primary_on_transient_parse_failure() -> N
     )
     fallback = make_fake_chat_model(model_name="fallback-model")
 
-    result = await call_structured(primary, fallback, [], _Answer)
+    result = await call_structured(primary, fallback, [], _Answer, max_attempts=2)
 
     assert result.parsed == _Answer(value="ok")
     assert result.models_invoked == ["primary-model"]
@@ -58,12 +58,12 @@ async def test_call_structured_falls_back_after_primary_exhausts_retries() -> No
         model_name="fallback-model", parsed_result=_Answer(value="from fallback")
     )
 
-    result = await call_structured(primary, fallback, [], _Answer)
+    result = await call_structured(primary, fallback, [], _Answer, max_attempts=2)
 
     assert result.parsed == _Answer(value="from fallback")
     assert result.models_invoked == ["primary-model", "fallback-model"]
     # 2 attempts against primary before call_structured moves on to fallback
-    # -- matches llm/structured.py's _STRUCTURED_OUTPUT_MAX_ATTEMPTS.
+    # -- matches this test's own max_attempts=2.
     assert len(primary.received_messages) == 2
 
 
@@ -72,7 +72,7 @@ async def test_call_structured_sums_cache_tokens_across_primary_and_fallback() -
     still count even though only fallback's parse ultimately succeeded --
     same rationale as test_call_structured_falls_back_after_primary_exhausts_retries.
     `fail_parse=True` means primary's `_generate` runs (and its fixed usage
-    is counted) on each of `_STRUCTURED_OUTPUT_MAX_ATTEMPTS` (2) attempts
+    is counted) on each of this test's own `max_attempts=2` attempts
     before the fallback is tried, so primary's cache tokens are counted
     twice here -- 2*100 + 40 = 240, 2*10 + 5 = 25."""
     primary = make_fake_chat_model(
@@ -88,10 +88,27 @@ async def test_call_structured_sums_cache_tokens_across_primary_and_fallback() -
         cache_creation_tokens=5,
     )
 
-    result = await call_structured(primary, fallback, [], _Answer)
+    result = await call_structured(primary, fallback, [], _Answer, max_attempts=2)
 
     assert result.cache_read_tokens == 240
     assert result.cache_creation_tokens == 25
+
+
+async def test_call_structured_honors_explicit_max_attempts() -> None:
+    """`max_attempts` is a required, caller-supplied parameter (see
+    `GuardrailSettings.structured_output_max_attempts`) -- this proves it
+    actually bounds the retry loop rather than some internal default: with
+    `max_attempts=1`, a failing primary falls back to `fallback` after
+    exactly one attempt, not two."""
+    primary = make_fake_chat_model(model_name="primary-model", fail_parse=True)
+    fallback = make_fake_chat_model(
+        model_name="fallback-model", parsed_result=_Answer(value="from fallback")
+    )
+
+    result = await call_structured(primary, fallback, [], _Answer, max_attempts=1)
+
+    assert result.parsed == _Answer(value="from fallback")
+    assert len(primary.received_messages) == 1
 
 
 async def test_call_structured_repairs_after_a_validation_error() -> None:
@@ -105,7 +122,7 @@ async def test_call_structured_repairs_after_a_validation_error() -> None:
     )
     fallback = make_fake_chat_model(model_name="fallback-model")
 
-    result = await call_structured(primary, fallback, [], _Answer)
+    result = await call_structured(primary, fallback, [], _Answer, max_attempts=2)
 
     assert result.parsed == _Answer(value="ok")
     assert len(primary.received_messages) == 2

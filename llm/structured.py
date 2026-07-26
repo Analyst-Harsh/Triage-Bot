@@ -14,20 +14,6 @@ from llm.result import LLMResult
 
 log = structlog.get_logger(__name__)
 
-# A structured-output call fails in two very different ways: a raw API error
-# (rate limit, timeout, ...), or the model's own response not conforming to
-# the schema (e.g. a required field silently omitted from the tool-call args
-# -- observed in production: every action in a multi-action DraftProposal
-# missing ProposedAction.rationale, right after ToolCallLimitMiddleware cut
-# the tool-calling loop short). The latter is often a systematic
-# instruction-following gap, not random sampling noise -- simply resending
-# the same prompt is unlikely to fix it, but telling the model exactly what
-# it got wrong (see `_invoke_with_repair`) often does. Each model gets this
-# many attempts before the next model in the fallback chain is tried. Kept
-# small: this only runs on the failure path, but each attempt is a real,
-# billed LLM call.
-_STRUCTURED_OUTPUT_MAX_ATTEMPTS = 2
-
 
 async def _invoke_with_repair(
     structured_runnable: Runnable[Sequence[BaseMessage], Any],
@@ -86,13 +72,23 @@ async def call_structured[T](
     fallback: BaseChatModel,
     messages: Sequence[BaseMessage],
     schema: type[T],
+    *,
+    max_attempts: int,
 ) -> LLMResult[T]:
     """Calls `primary` for `schema`-shaped structured output, falling back to
     `fallback` on ANY failure — a raw API error (rate limit, timeout, ...) or
     a structured-output parsing failure alike. Each model gets its own
-    `_STRUCTURED_OUTPUT_MAX_ATTEMPTS` attempts (see `_invoke_with_repair`)
-    before the next model in the chain is tried, rather than giving up on a
-    model after a single bad sample.
+    `max_attempts` attempts (see `_invoke_with_repair`, and
+    `Settings.guardrails.structured_output_max_attempts` for the production
+    default) before the next model in the chain is tried, rather than giving
+    up on a model after a single bad sample.
+
+    `max_attempts` is a required, explicit parameter rather than this
+    function reading `get_settings()` itself: this keeps `call_structured`
+    pure and trivially testable in isolation (see `tests/llm/test_structured.py`,
+    which constructs fake models directly with no `Settings` dependency at
+    all) — callers that already have `Settings` cached (`LLMNode.__init__`,
+    `AgentSubgraph.__init__`) resolve the value once and pass it through.
 
     Deliberately does NOT pass `include_raw=True`: with the default
     `include_raw=False`, a parsing failure is *raised* rather than swallowed
@@ -128,16 +124,12 @@ async def call_structured[T](
         try:
             parsed = cast(
                 T,
-                await _invoke_with_repair(
-                    primary_structured, messages, max_attempts=_STRUCTURED_OUTPUT_MAX_ATTEMPTS
-                ),
+                await _invoke_with_repair(primary_structured, messages, max_attempts=max_attempts),
             )
         except Exception:
             parsed = cast(
                 T,
-                await _invoke_with_repair(
-                    fallback_structured, messages, max_attempts=_STRUCTURED_OUTPUT_MAX_ATTEMPTS
-                ),
+                await _invoke_with_repair(fallback_structured, messages, max_attempts=max_attempts),
             )
     total_in = sum(usage["input_tokens"] for usage in cb.usage_metadata.values())
     total_out = sum(usage["output_tokens"] for usage in cb.usage_metadata.values())

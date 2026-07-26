@@ -42,18 +42,17 @@ log = structlog.get_logger(__name__)
 
 _P = ParamSpec("_P")
 
-MAX_SANDBOX_FIX_ATTEMPTS = 6
-
-# Unlike fix_attempt, baseline/repro have no natural cap on "productive"
-# retries (a model can legitimately need a couple of tries to find the right
+# Attempt caps for fix/baseline/repro (formerly module constants here) now
+# live in `Settings.guardrails.sandbox_max_*_attempts` -- see
+# `config.guardrail_settings.GuardrailSettings`'s docstring. Unlike
+# fix_attempt, baseline/repro have no natural cap on "productive" retries (a
+# model can legitimately need a couple of tries to find the right
 # invocation) -- but with no cap at all, a baseline that's failing for a
 # structural reason (a missing test dependency, not a bad test-command
 # invocation) can absorb the entire tool-call budget on cosmetic invocation
 # variants that were never going to work, leaving zero calls for the fix
 # itself. These caps exist to force the model back to install_dependencies
 # (via the ERROR text below) well before that happens.
-MAX_SANDBOX_BASELINE_ATTEMPTS = 3
-MAX_SANDBOX_REPRO_ATTEMPTS = 3
 
 # Where the repo tarball is extracted inside the sandbox. Fixed rather than
 # configurable: it's an implementation detail of this module, never exposed
@@ -219,14 +218,14 @@ class SandboxHandle:
                 )
 
             sandbox = await AsyncSandbox.create(
-                timeout=int(self._settings.e2b_sandbox_session_timeout_seconds),
+                timeout=int(self._settings.guardrails.e2b_sandbox_session_timeout_seconds),
                 api_key=self._settings.e2b_api_key.get_secret_value(),
                 network=network,
             )
 
             resolved_ref, sha, tarball_url = await self._resolve_ref_and_tarball_url()
 
-            setup_timeout = int(self._settings.e2b_install_timeout_seconds)
+            setup_timeout = int(self._settings.guardrails.e2b_install_timeout_seconds)
             # Never `git clone` -- fetch+extract the tarball at the resolved
             # SHA instead, then synthesize a local git history so `git diff`
             # has a baseline (GitHub tarballs ship with no .git).
@@ -330,7 +329,9 @@ class SandboxHandle:
         >= e2b_max_billed_seconds_per_run`, so this is only reached with a
         strictly positive remaining budget, potentially under a second.
         """
-        remaining_budget = self._settings.e2b_max_billed_seconds_per_run - self._billed_seconds
+        remaining_budget = (
+            self._settings.guardrails.e2b_max_billed_seconds_per_run - self._billed_seconds
+        )
         return max(1, int(min(configured_timeout, remaining_budget)))
 
     @staticmethod
@@ -630,7 +631,7 @@ class SandboxHandle:
                         reason="unrecognized_installer",
                     )
                     return f"ERROR: unrecognized installer command: {command!r}"
-                if self._billed_seconds >= self._settings.e2b_max_billed_seconds_per_run:
+                if self._billed_seconds >= self._settings.guardrails.e2b_max_billed_seconds_per_run:
                     log.info(
                         "sandbox_tool_result",
                         tool="install_dependencies",
@@ -651,7 +652,7 @@ class SandboxHandle:
                 result = await self._run_command(
                     command,
                     timeout_seconds=self._bounded_timeout_seconds(
-                        self._settings.e2b_install_timeout_seconds
+                        self._settings.guardrails.e2b_install_timeout_seconds
                     ),
                     cwd=_REPO_DIR,
                 )
@@ -742,20 +743,27 @@ class SandboxHandle:
                     )
                 if (
                     kind == "baseline"
-                    and self._attempt_count("baseline") >= MAX_SANDBOX_BASELINE_ATTEMPTS
+                    and self._attempt_count("baseline")
+                    >= self._settings.guardrails.sandbox_max_baseline_attempts
                 ):
                     return _refuse(
                         "baseline_attempt_cap",
-                        f"ERROR: baseline attempt limit ({MAX_SANDBOX_BASELINE_ATTEMPTS}) reached.",
+                        "ERROR: baseline attempt limit "
+                        f"({self._settings.guardrails.sandbox_max_baseline_attempts}) reached.",
                     )
                 if kind in ("repro", "fix_attempt") and not self._has_passing_baseline():
                     return _refuse(
                         "no_passing_baseline", 'ERROR: no passing "baseline" run recorded yet'
                     )
-                if kind == "repro" and self._attempt_count("repro") >= MAX_SANDBOX_REPRO_ATTEMPTS:
+                if (
+                    kind == "repro"
+                    and self._attempt_count("repro")
+                    >= self._settings.guardrails.sandbox_max_repro_attempts
+                ):
                     return _refuse(
                         "repro_attempt_cap",
-                        f"ERROR: repro attempt limit ({MAX_SANDBOX_REPRO_ATTEMPTS}) reached",
+                        "ERROR: repro attempt limit "
+                        f"({self._settings.guardrails.sandbox_max_repro_attempts}) reached",
                     )
                 if kind == "fix_attempt" and self._attempt_count("repro") == 0:
                     return _refuse(
@@ -767,13 +775,15 @@ class SandboxHandle:
                     )
                 if (
                     kind == "fix_attempt"
-                    and self._attempt_count("fix_attempt") >= MAX_SANDBOX_FIX_ATTEMPTS
+                    and self._attempt_count("fix_attempt")
+                    >= self._settings.guardrails.sandbox_max_fix_attempts
                 ):
                     return _refuse(
                         "fix_attempt_cap",
-                        f"ERROR: fix attempt limit ({MAX_SANDBOX_FIX_ATTEMPTS}) reached",
+                        "ERROR: fix attempt limit "
+                        f"({self._settings.guardrails.sandbox_max_fix_attempts}) reached",
                     )
-                if self._billed_seconds >= self._settings.e2b_max_billed_seconds_per_run:
+                if self._billed_seconds >= self._settings.guardrails.e2b_max_billed_seconds_per_run:
                     return _refuse(
                         "billed_seconds_exhausted", "ERROR: sandbox billed-seconds budget exhausted"
                     )
@@ -822,7 +832,7 @@ class SandboxHandle:
                 test_result = await self._run_command(
                     test_command,
                     timeout_seconds=self._bounded_timeout_seconds(
-                        self._settings.e2b_test_command_timeout_seconds
+                        self._settings.guardrails.e2b_test_command_timeout_seconds
                     ),
                     cwd=_REPO_DIR,
                 )
@@ -919,8 +929,8 @@ class SandboxHandle:
     def estimated_cost_usd(self) -> float:
         """Observability only -- feeds `RunMeta.estimated_cost_usd`, never
         used to gate anything (the real gate is billed-seconds vs.
-        `e2b_max_billed_seconds_per_run`, checked directly in run_tests/
-        install_dependencies)."""
+        `Settings.guardrails.e2b_max_billed_seconds_per_run`, checked
+        directly in run_tests/install_dependencies)."""
         return self._billed_seconds * self._settings.e2b_cost_per_second_usd
 
     async def aclose(self) -> None:
