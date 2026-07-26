@@ -278,9 +278,17 @@ async def test_invoke_short_circuits_to_spam_rejected_without_reaching_researche
 ) -> None:
     """End-to-end: a `SPAM_OR_ABUSE`-classified issue routes straight from
     `planner` to `spam_rejected` and ends there -- `researcher`/`drafter`/
-    `risk_check`/`auto_post` never run, proven by leaving them un-faked
-    (a real LLM/GitHub call from any of them would error out in this
-    hermetic test, not silently pass)."""
+    `risk_check`/`auto_post` never run, proven by the state assertions below
+    (`research_findings`/`draft`/`risk_assessment`/`post_results` all stay
+    `None`). Every downstream node is still faked, exactly like
+    `test_invoke_flows_through_all_nodes_to_auto_post` -- `build_graph()`
+    *constructs* every node regardless of which ones the routing actually
+    reaches, and real construction (`ResearcherSubgraph`/`DrafterSubgraph`/
+    `RiskCheckNode`'s real `__init__` building a real OpenAI chat client,
+    `AutoPostNode`/`ApprovalQueueNode`'s real `__init__` resolving the
+    process-wide `GitHubClient`) needs credentials this hermetic test must
+    not depend on, even though none of these nodes ever actually run this
+    turn."""
 
     def _fake_spam_planner_node(memory_store: BaseEpisodicMemoryStore) -> PlannerNode:
         return make_fake_planner_node(
@@ -294,6 +302,11 @@ async def test_invoke_short_circuits_to_spam_rejected_without_reaching_researche
         )
 
     monkeypatch.setattr(builder_module, "PlannerNode", _fake_spam_planner_node)
+    monkeypatch.setattr(builder_module, "ResearcherSubgraph", make_fake_researcher_subgraph)
+    monkeypatch.setattr(builder_module, "DrafterSubgraph", make_fake_drafter_subgraph)
+    monkeypatch.setattr(builder_module, "RiskCheckNode", make_fake_risk_check_node)
+    monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
+    monkeypatch.setattr(builder_module, "ApprovalQueueNode", make_fake_approval_queue_node)
     graph = build_graph()
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
