@@ -2,70 +2,76 @@
 
 [Full report](https://htmlpreview.github.io/?https://github.com/Analyst-Harsh/Triage-Bot/blob/python-coverage-comment-action-data/htmlcov/index.html)
 
-| Name                                            |    Stmts |     Miss |   Cover |   Missing |
-|------------------------------------------------ | -------: | -------: | ------: | --------: |
-| config/\_\_init\_\_.py                          |        2 |        0 |    100% |           |
-| config/settings.py                              |       37 |        0 |    100% |           |
-| graph/\_\_init\_\_.py                           |        0 |        0 |    100% |           |
-| graph/builder.py                                |       38 |        0 |    100% |           |
-| graph/checkpointer.py                           |       15 |        0 |    100% |           |
-| graph/nodes/\_\_init\_\_.py                     |       12 |        0 |    100% |           |
-| graph/nodes/agent\_subgraph.py                  |       90 |        8 |     91% |127-131, 139, 149, 174 |
-| graph/nodes/approval\_queue.py                  |       62 |        1 |     98% |       118 |
-| graph/nodes/auto\_post.py                       |       43 |        3 |     93% | 39-40, 95 |
-| graph/nodes/base.py                             |       28 |        1 |     96% |       100 |
-| graph/nodes/drafter.py                          |       77 |        3 |     96% |99-100, 270 |
-| graph/nodes/llm\_node.py                        |       18 |        3 |     83% |     36-38 |
-| graph/nodes/node\_names.py                      |        8 |        0 |    100% |           |
-| graph/nodes/planner.py                          |       27 |        2 |     93% |     33-34 |
-| graph/nodes/researcher.py                       |       38 |        0 |    100% |           |
-| graph/nodes/risk\_check.py                      |       52 |        1 |     98% |        47 |
-| graph/nodes/routing.py                          |       11 |        0 |    100% |           |
-| graph/nodes/trajectory.py                       |       73 |        0 |    100% |           |
-| graph/nodes/utils/\_\_init\_\_.py               |        0 |        0 |    100% |           |
-| graph/nodes/utils/action\_executor.py           |       46 |        1 |     98% |       128 |
-| graph/nodes/utils/approval\_request\_builder.py |       41 |        0 |    100% |           |
-| graph/nodes/utils/episodic\_memory\_gateway.py  |       21 |        0 |    100% |           |
-| graph/schemas/\_\_init\_\_.py                   |       16 |        0 |    100% |           |
-| graph/schemas/actions.py                        |       20 |        0 |    100% |           |
-| graph/schemas/approval\_decision.py             |        8 |        0 |    100% |           |
-| graph/schemas/approval\_request.py              |       16 |        0 |    100% |           |
-| graph/schemas/draft.py                          |       12 |        0 |    100% |           |
-| graph/schemas/enums.py                          |       38 |        0 |    100% |           |
-| graph/schemas/episode.py                        |        8 |        0 |    100% |           |
-| graph/schemas/grounding.py                      |        3 |        0 |    100% |           |
-| graph/schemas/issue.py                          |        7 |        0 |    100% |           |
-| graph/schemas/memory.py                         |        6 |        0 |    100% |           |
-| graph/schemas/planner.py                        |       10 |        0 |    100% |           |
-| graph/schemas/post\_result.py                   |        7 |        0 |    100% |           |
-| graph/schemas/research.py                       |       23 |        0 |    100% |           |
-| graph/schemas/risk.py                           |       12 |        0 |    100% |           |
-| graph/schemas/run\_meta.py                      |       17 |        0 |    100% |           |
-| graph/schemas/sandbox.py                        |        5 |        0 |    100% |           |
-| graph/state.py                                  |        9 |        0 |    100% |           |
-| llm/\_\_init\_\_.py                             |        6 |        0 |    100% |           |
-| llm/config.py                                   |        5 |        0 |    100% |           |
-| llm/factory.py                                  |       11 |        0 |    100% |           |
-| llm/pricing.py                                  |       14 |        0 |    100% |           |
-| llm/result.py                                   |        5 |        0 |    100% |           |
-| llm/structured.py                               |       43 |        1 |     98% |        81 |
-| main.py                                         |       84 |       31 |     63% |52-55, 70-76, 126-214, 223 |
-| observability/\_\_init\_\_.py                   |        0 |        0 |    100% |           |
-| observability/logging\_config.py                |       21 |        0 |    100% |           |
-| observability/tracing.py                        |       38 |        7 |     82% |154-168, 189-190 |
-| prompts/\_\_init\_\_.py                         |        2 |        0 |    100% |           |
-| prompts/drafter.py                              |       80 |        0 |    100% |           |
-| prompts/planner.py                              |       15 |        0 |    100% |           |
-| prompts/researcher.py                           |       11 |        0 |    100% |           |
-| prompts/risk\_check.py                          |       17 |        0 |    100% |           |
-| tools/\_\_init\_\_.py                           |        0 |        0 |    100% |           |
-| tools/mcp\_clients.py                           |       50 |        9 |     82% |   102-110 |
-| tools/sandbox.py                                |      396 |       17 |     96% |111-112, 114, 204, 438, 483-485, 509-510, 634-641, 961, 964, 967, 972, 975 |
-| utils/\_\_init\_\_.py                           |        0 |        0 |    100% |           |
-| utils/diff\_applier.py                          |      105 |        8 |     92% |35, 51, 67-68, 90, 96, 116, 200 |
-| utils/episodic\_memory\_store.py                |       68 |       10 |     85% |68, 82, 226-244 |
-| utils/github\_client.py                         |       71 |        1 |     99% |       148 |
-| **TOTAL**                                       | **1998** |  **107** | **95%** |           |
+| Name                                             |    Stmts |     Miss |   Cover |   Missing |
+|------------------------------------------------- | -------: | -------: | ------: | --------: |
+| config/\_\_init\_\_.py                           |        2 |        0 |    100% |           |
+| config/guardrail\_settings.py                    |       16 |        0 |    100% |           |
+| config/settings.py                               |       33 |        0 |    100% |           |
+| graph/\_\_init\_\_.py                            |        0 |        0 |    100% |           |
+| graph/builder.py                                 |       43 |        0 |    100% |           |
+| graph/checkpointer.py                            |       15 |        0 |    100% |           |
+| graph/errors.py                                  |        8 |        0 |    100% |           |
+| graph/nodes/\_\_init\_\_.py                      |       13 |        0 |    100% |           |
+| graph/nodes/agent\_subgraph.py                   |       97 |       10 |     90% |139-145, 153, 163, 188 |
+| graph/nodes/approval\_queue.py                   |       62 |        1 |     98% |       118 |
+| graph/nodes/auto\_post.py                        |       43 |        3 |     93% | 39-40, 95 |
+| graph/nodes/base.py                              |       30 |        1 |     97% |       104 |
+| graph/nodes/drafter.py                           |       78 |        3 |     96% |96-97, 276 |
+| graph/nodes/llm\_node.py                         |       19 |        4 |     79% |     36-39 |
+| graph/nodes/node\_names.py                       |        9 |        0 |    100% |           |
+| graph/nodes/planner.py                           |       27 |        2 |     93% |     33-34 |
+| graph/nodes/researcher.py                        |       40 |        1 |     98% |        45 |
+| graph/nodes/risk\_check.py                       |       78 |        5 |     94% |36-37, 65-66, 71 |
+| graph/nodes/routing.py                           |       18 |        0 |    100% |           |
+| graph/nodes/spam\_rejected.py                    |       23 |        0 |    100% |           |
+| graph/nodes/trajectory.py                        |       73 |        0 |    100% |           |
+| graph/nodes/utils/\_\_init\_\_.py                |        0 |        0 |    100% |           |
+| graph/nodes/utils/action\_executor.py            |       46 |        1 |     98% |       128 |
+| graph/nodes/utils/approval\_request\_builder.py  |       41 |        0 |    100% |           |
+| graph/nodes/utils/budget\_guard.py               |        7 |        0 |    100% |           |
+| graph/nodes/utils/budget\_guard\_middleware.py   |       19 |        0 |    100% |           |
+| graph/nodes/utils/episodic\_memory\_gateway.py   |       21 |        0 |    100% |           |
+| graph/nodes/utils/injection\_pattern\_scanner.py |       32 |        1 |     97% |       118 |
+| graph/schemas/\_\_init\_\_.py                    |       16 |        0 |    100% |           |
+| graph/schemas/actions.py                         |       20 |        0 |    100% |           |
+| graph/schemas/approval\_decision.py              |        8 |        0 |    100% |           |
+| graph/schemas/approval\_request.py               |       16 |        0 |    100% |           |
+| graph/schemas/draft.py                           |       12 |        0 |    100% |           |
+| graph/schemas/enums.py                           |       38 |        0 |    100% |           |
+| graph/schemas/episode.py                         |        9 |        0 |    100% |           |
+| graph/schemas/grounding.py                       |        3 |        0 |    100% |           |
+| graph/schemas/issue.py                           |        7 |        0 |    100% |           |
+| graph/schemas/memory.py                          |        6 |        0 |    100% |           |
+| graph/schemas/planner.py                         |       10 |        0 |    100% |           |
+| graph/schemas/post\_result.py                    |        7 |        0 |    100% |           |
+| graph/schemas/research.py                        |       23 |        0 |    100% |           |
+| graph/schemas/risk.py                            |       12 |        0 |    100% |           |
+| graph/schemas/run\_meta.py                       |       17 |        0 |    100% |           |
+| graph/schemas/sandbox.py                         |        5 |        0 |    100% |           |
+| graph/state.py                                   |        9 |        0 |    100% |           |
+| llm/\_\_init\_\_.py                              |        6 |        0 |    100% |           |
+| llm/config.py                                    |        5 |        0 |    100% |           |
+| llm/factory.py                                   |       11 |        0 |    100% |           |
+| llm/pricing.py                                   |       14 |        0 |    100% |           |
+| llm/result.py                                    |        5 |        0 |    100% |           |
+| llm/structured.py                                |       42 |        1 |     98% |        67 |
+| main.py                                          |       85 |       32 |     62% |52-55, 70-76, 126-215, 224 |
+| observability/\_\_init\_\_.py                    |        0 |        0 |    100% |           |
+| observability/logging\_config.py                 |       21 |        0 |    100% |           |
+| observability/tracing.py                         |       38 |        7 |     82% |154-168, 189-190 |
+| prompts/\_\_init\_\_.py                          |        2 |        0 |    100% |           |
+| prompts/drafter.py                               |       80 |        0 |    100% |           |
+| prompts/planner.py                               |       15 |        0 |    100% |           |
+| prompts/researcher.py                            |       11 |        0 |    100% |           |
+| prompts/risk\_check.py                           |       17 |        0 |    100% |           |
+| tools/\_\_init\_\_.py                            |        0 |        0 |    100% |           |
+| tools/mcp\_clients.py                            |       50 |        9 |     82% |   102-110 |
+| tools/sandbox.py                                 |      393 |       17 |     96% |110-111, 113, 203, 439, 484-486, 510-511, 635-642, 971, 974, 977, 982, 985 |
+| utils/\_\_init\_\_.py                            |        0 |        0 |    100% |           |
+| utils/diff\_applier.py                           |      105 |        8 |     92% |35, 51, 67-68, 90, 96, 116, 200 |
+| utils/episodic\_memory\_store.py                 |       68 |       10 |     85% |68, 82, 230-248 |
+| utils/github\_client.py                          |       71 |        1 |     99% |       148 |
+| **TOTAL**                                        | **2150** |  **117** | **95%** |           |
 
 
 ## Setup coverage badge
