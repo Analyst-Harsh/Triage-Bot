@@ -65,15 +65,29 @@ class AutoPostNode(TriageNode):
 
         post_results = PostResults(action_results=results, evaluated_at=datetime.now(UTC))
         any_queued = any(r.outcome == PostOutcome.QUEUED for r in results)
+        failed = [r for r in results if r.outcome == PostOutcome.FAILED]
         log.info(
             "auto_post_completed",
             issue_number=issue.issue_number,
             posted=sum(1 for r in results if r.outcome == PostOutcome.POSTED),
-            failed=sum(1 for r in results if r.outcome == PostOutcome.FAILED),
+            failed=len(failed),
             queued=sum(1 for r in results if r.outcome == PostOutcome.QUEUED),
             dry_run=dry_run,
         )
         status = RunStatus.PENDING_APPROVAL if any_queued else RunStatus.AUTO_POSTED
+        if failed:
+            # `status` still records the routing decision (see class
+            # docstring / docs/agent/architecture-conventions.md) -- this
+            # is the signal that actually reaches RunError/the node's
+            # Langfuse span (TriageNode.__call__) when a real GitHub post
+            # failed, which `status` alone never surfaced.
+            run_meta = run_meta.with_error(
+                node_name=self.name,
+                error_message=(
+                    f"{len(failed)} action(s) failed to post: "
+                    + "; ".join(r.detail or "" for r in failed)
+                ),
+            )
 
         if status == RunStatus.AUTO_POSTED and not dry_run:
             planner_output = state["planner_output"]
@@ -89,4 +103,4 @@ class AutoPostNode(TriageNode):
                 outcome=status,
             )
 
-        return TriageStateUpdate(post_results=post_results, status=status)
+        return TriageStateUpdate(post_results=post_results, status=status, run_meta=run_meta)

@@ -1,6 +1,6 @@
-"""Structured logging setup: the first of observability/'s cross-cutting
-systems (see docs/summary.md's "Observability" section) — OpenTelemetry +
-Langfuse tracing will join this package later, but that's out of scope here.
+"""Structured logging setup: one of observability/'s cross-cutting systems
+(see docs/summary.md's "Observability" section) — `tracing.py` (Langfuse
+tracing, OpenTelemetry-based) is the other, out of scope here.
 
 `configure_logging()` wires structlog's own processor chain AND routes
 stdlib `logging` (used internally by langgraph, langchain-core, and

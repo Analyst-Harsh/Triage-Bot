@@ -51,6 +51,7 @@ def create_initial_state(
     max_iterations: int,
     max_cost_usd: float,
     dry_run: bool = True,
+    trace_id: str | None = None,
 ) -> TriageState:
     thread_id = f"{issue.repo_full_name}#{issue.issue_number}"
     return TriageState(
@@ -65,7 +66,7 @@ def create_initial_state(
         run_meta=RunMeta(
             run_id=uuid4(),
             thread_id=thread_id,
-            trace_id=None,
+            trace_id=trace_id,
             started_at=datetime.now(UTC),
             max_iterations=max_iterations,
             max_cost_usd=max_cost_usd,

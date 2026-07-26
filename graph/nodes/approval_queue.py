@@ -87,16 +87,30 @@ class ApprovalQueueNode(TriageNode):
             )
 
         updated_post_results = PostResults(action_results=results, evaluated_at=datetime.now(UTC))
+        failed = [r for r in results if r.outcome == PostOutcome.FAILED]
         log.info(
             "approval_queue_resolved",
             issue_number=issue.issue_number,
             approved=sum(1 for d in decision.decisions if d.approved),
             rejected=sum(1 for d in decision.decisions if not d.approved),
             posted=sum(1 for r in results if r.outcome == PostOutcome.POSTED),
-            failed=sum(1 for r in results if r.outcome == PostOutcome.FAILED),
+            failed=len(failed),
             dry_run=run_meta.dry_run,
         )
         status = RunStatus.APPROVED_AND_POSTED if any_approved else RunStatus.REJECTED
+        if failed:
+            # `status` still records the human's approval decision (see
+            # class docstring / docs/agent/architecture-conventions.md) --
+            # this is the signal that actually reaches RunError/the node's
+            # Langfuse span (TriageNode.__call__) when a real GitHub post
+            # failed, which `status` alone never surfaced.
+            run_meta = run_meta.with_error(
+                node_name=self.name,
+                error_message=(
+                    f"{len(failed)} action(s) failed to post: "
+                    + "; ".join(r.detail or "" for r in failed)
+                ),
+            )
 
         if not run_meta.dry_run:
             planner_output = state["planner_output"]
@@ -112,7 +126,9 @@ class ApprovalQueueNode(TriageNode):
                 outcome=status,
             )
 
-        return TriageStateUpdate(post_results=updated_post_results, status=status)
+        return TriageStateUpdate(
+            post_results=updated_post_results, status=status, run_meta=run_meta
+        )
 
 
 def _validate_decision(raw: object, queued_indices: list[int]) -> ApprovalDecision:

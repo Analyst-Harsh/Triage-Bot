@@ -29,6 +29,7 @@ from graph.state import TriageState, TriageStateUpdate
 from llm.config import NodeLLMConfig
 from llm.factory import create_chat_model
 from llm.structured import call_structured
+from observability.tracing import node_span
 
 log = structlog.get_logger(__name__)
 
@@ -302,39 +303,52 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         # against summary_schema when call_structured parsed it.
         summary = cast(SummaryT | None, state.get("summary"))
 
-        update = await self.finalize(summary, tool_calls, state)
+        async with node_span(self.name) as span:
+            update = await self.finalize(summary, tool_calls, state)
 
-        run_meta = update.get("run_meta", state["run_meta"])
-        cap_hit = len(tool_calls) >= self.max_tool_calls
-        total_cache_read_tokens = trajectory.cache_read_tokens + summarize_cache_read_tokens
-        total_cache_creation_tokens = (
-            trajectory.cache_creation_tokens + summarize_cache_creation_tokens
-        )
-        update["run_meta"] = run_meta.with_usage(
-            cost_usd=trajectory.cost_usd + summarize_cost,
-            tool_calls=len(tool_calls),
-            iterations=1,
-            cache_read_tokens=total_cache_read_tokens,
-            cache_creation_tokens=total_cache_creation_tokens,
-        )
-        # Ratio over the trajectory's own tokens only -- the dominant volume
-        # in a multi-turn tool loop -- not a whole-node figure (the
-        # post-loop summarize call isn't folded in), hence the `trajectory_`
-        # prefix rather than a bare `cache_hit_ratio`.
-        trajectory_cache_hit_ratio = (
-            trajectory.cache_read_tokens / trajectory.total_input_tokens
-            if trajectory.total_input_tokens
-            else 0.0
-        )
-        log.info(
-            "agent_subgraph_finished",
-            node=self.name,
-            tool_call_count=len(tool_calls),
-            tools_used=sorted({call.tool_name for call in tool_calls}),
-            cost_usd=trajectory.cost_usd + summarize_cost,
-            cache_read_tokens=total_cache_read_tokens,
-            cache_creation_tokens=total_cache_creation_tokens,
-            trajectory_cache_hit_ratio=trajectory_cache_hit_ratio,
-            cap_hit=cap_hit,
-        )
+            run_meta = update.get("run_meta", state["run_meta"])
+            cap_hit = len(tool_calls) >= self.max_tool_calls
+            total_cache_read_tokens = trajectory.cache_read_tokens + summarize_cache_read_tokens
+            total_cache_creation_tokens = (
+                trajectory.cache_creation_tokens + summarize_cache_creation_tokens
+            )
+            update["run_meta"] = run_meta.with_usage(
+                cost_usd=trajectory.cost_usd + summarize_cost,
+                tool_calls=len(tool_calls),
+                iterations=1,
+                cache_read_tokens=total_cache_read_tokens,
+                cache_creation_tokens=total_cache_creation_tokens,
+            )
+            # Ratio over the trajectory's own tokens only -- the dominant volume
+            # in a multi-turn tool loop -- not a whole-node figure (the
+            # post-loop summarize call isn't folded in), hence the `trajectory_`
+            # prefix rather than a bare `cache_hit_ratio`.
+            trajectory_cache_hit_ratio = (
+                trajectory.cache_read_tokens / trajectory.total_input_tokens
+                if trajectory.total_input_tokens
+                else 0.0
+            )
+            log.info(
+                "agent_subgraph_finished",
+                node=self.name,
+                tool_call_count=len(tool_calls),
+                tools_used=sorted({call.tool_name for call in tool_calls}),
+                cost_usd=trajectory.cost_usd + summarize_cost,
+                cache_read_tokens=total_cache_read_tokens,
+                cache_creation_tokens=total_cache_creation_tokens,
+                trajectory_cache_hit_ratio=trajectory_cache_hit_ratio,
+                cap_hit=cap_hit,
+            )
+            if span is not None:
+                span.update(
+                    metadata={
+                        "tool_call_count": len(tool_calls),
+                        "tools_used": sorted({call.tool_name for call in tool_calls}),
+                        "authoritative_cost_usd": trajectory.cost_usd + summarize_cost,
+                        "authoritative_cache_read_tokens": total_cache_read_tokens,
+                        "authoritative_cache_creation_tokens": total_cache_creation_tokens,
+                        "trajectory_cache_hit_ratio": trajectory_cache_hit_ratio,
+                        "cap_hit": cap_hit,
+                    }
+                )
         return update

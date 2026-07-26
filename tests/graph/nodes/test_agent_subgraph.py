@@ -12,12 +12,17 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from pydantic import BaseModel
 from structlog.testing import capture_logs
 
+import graph.nodes.agent_subgraph as agent_subgraph_module
 from graph.nodes.agent_subgraph import AgentLoopState, AgentSubgraph
 from graph.nodes.node_names import NodeName
 from graph.schemas import ToolCallRecord
 from graph.state import TriageState, TriageStateUpdate
 from llm.config import LLMEndpointConfig, NodeLLMConfig
-from tests.graph.nodes.conftest import FakeStructuredChatModel, make_fake_chat_model
+from tests.graph.nodes.conftest import (
+    FakeStructuredChatModel,
+    RecordingNodeSpan,
+    make_fake_chat_model,
+)
 
 
 class _StubSummary(BaseModel):
@@ -242,6 +247,53 @@ async def test_assemble_node_does_not_log_cap_hit_under_limit(triage_state: Tria
 
     finished = next(entry for entry in cap_logs if entry["event"] == "agent_subgraph_finished")
     assert finished["cap_hit"] is False
+
+
+async def test_assemble_node_wraps_finalize_in_a_node_span_named_after_the_node(
+    triage_state: TriageState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recording = RecordingNodeSpan()
+    monkeypatch.setattr(agent_subgraph_module, "node_span", recording)
+    node = make_node()
+    state = make_loop_state(triage_state, summary=_StubSummary(note="x"), messages=[])
+
+    await node.assemble_node(state)
+
+    assert len(recording.spans) == 1
+    assert recording.spans[0].name == NodeName.RESEARCHER
+
+
+async def test_assemble_node_enriches_span_with_authoritative_usage_metadata(
+    triage_state: TriageState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recording = RecordingNodeSpan()
+    monkeypatch.setattr(agent_subgraph_module, "node_span", recording)
+    node = make_node()
+    messages: list[BaseMessage] = [
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "lookup", "args": {}, "id": "call_0"}],
+            usage_metadata={
+                "input_tokens": 2000,
+                "output_tokens": 50,
+                "total_tokens": 2050,
+                "input_token_details": {"cache_read": 1500, "cache_creation": 0},
+            },
+            response_metadata={"model_name": "gpt-4o-mini"},
+        ),
+        ToolMessage(content="ok", tool_call_id="call_0", status="success"),
+    ]
+    state = make_loop_state(triage_state, summary=_StubSummary(note="x"), messages=messages)
+
+    await node.assemble_node(state)
+
+    span = recording.spans[0]
+    assert len(span.update_calls) == 1
+    metadata = span.update_calls[0]["metadata"]
+    assert metadata["tool_call_count"] == 1
+    assert metadata["tools_used"] == ["lookup"]
+    assert metadata["authoritative_cache_read_tokens"] == 1500
+    assert metadata["cap_hit"] is False
 
 
 async def test_summarize_node_parses_structured_output(triage_state: TriageState) -> None:

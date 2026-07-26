@@ -21,13 +21,19 @@ from graph.schemas import (
 )
 from graph.state import TriageState, create_initial_state
 from observability.logging_config import configure_logging
+from observability.tracing import (
+    build_callback_handler,
+    create_trace_id,
+    ensure_langfuse_client,
+    root_span,
+)
 from tools.mcp_clients import researcher_toolset
 from tools.sandbox import sandbox_toolset
 from utils.episodic_memory_store import episodic_memory_store
 from utils.github_client import get_github_client
 
 REPO_FULL_NAME = "Analyst-Harsh/triage-bot-test"
-ISSUE_NUMBER = 1
+ISSUE_NUMBER = 3
 RESULTS_DIR = Path("results")
 
 log = structlog.get_logger(__name__)
@@ -118,11 +124,34 @@ async def resume_paused_run(
 
 async def main() -> None:
     configure_logging()
+    ensure_langfuse_client(get_settings())
     github_client = get_github_client()
     thread_id = f"{REPO_FULL_NAME}#{ISSUE_NUMBER}"
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    # Deterministic seed (repo#issue_number, same as thread_id) rather than a
+    # random one -- lets a future out-of-process resume re-derive the exact
+    # same trace ID and continue this run's trace instead of starting a new
+    # one. Computed unconditionally (cheap hashing, no client needed) so
+    # RunMeta.trace_id is always populated even when Langfuse isn't
+    # configured.
+    trace_id = create_trace_id(thread_id)
+    callback_handler = build_callback_handler()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id},
+        "callbacks": [callback_handler] if callback_handler else [],
+    }
 
     async with (
+        # Outermost so it covers everything below: the issue fetch, both
+        # `graph.ainvoke()` calls (including the interrupt/resume path), and
+        # the result-file write -- one trace for the whole run, not just the
+        # graph invocation. `session_id=thread_id` also groups the initial
+        # run and its resume together in Langfuse's UI.
+        root_span(
+            name="triage_run",
+            trace_id=trace_id,
+            session_id=thread_id,
+            metadata={"repo": REPO_FULL_NAME, "issue_number": ISSUE_NUMBER},
+        ),
         sqlite_checkpointer() as checkpointer,
         researcher_toolset(get_settings()) as tools,
         # Reuses `github_client.raw` (the same underlying `Github` instance
@@ -156,7 +185,13 @@ async def main() -> None:
             result = await resume_paused_run(graph, config, snapshot.interrupts[0].value)
         else:
             issue = github_client.fetch_issue(REPO_FULL_NAME, ISSUE_NUMBER)
-            state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0, dry_run=False)
+            state = create_initial_state(
+                issue,
+                max_iterations=10,
+                max_cost_usd=1.0,
+                dry_run=False,
+                trace_id=trace_id,
+            )
             log.info(
                 "run_started",
                 repo=REPO_FULL_NAME,
