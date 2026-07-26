@@ -24,6 +24,8 @@ from graph.nodes.trajectory import (
     estimate_trajectory_usage,
     resolve_dangling_tool_calls,
 )
+from graph.nodes.utils.budget_guard import check_budget
+from graph.nodes.utils.budget_guard_middleware import BudgetGuardMiddleware
 from graph.schemas import ToolCallRecord
 from graph.state import TriageState, TriageStateUpdate
 from llm.config import NodeLLMConfig
@@ -89,8 +91,14 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
 
     name: ClassVar[NodeName]
     llm_config: ClassVar[NodeLLMConfig]
-    max_tool_calls: ClassVar[int]
     summary_schema: ClassVar[type[BaseModel]]
+
+    max_tool_calls: int
+    """Set in `__init__` from the caller (ultimately `Settings.guardrails`),
+    not a `ClassVar`: the cap is an ops-tunable value resolved at
+    construction time, not a fact about the subclass itself. Subclasses'
+    own `__init__` (e.g. `ResearcherSubgraph`) supply their own guardrail
+    field through to `super().__init__(tools, max_tool_calls=...)`."""
 
     # Every in-loop model call resends the full accumulated trajectory,
     # ToolMessage content included -- with no bound on cumulative size,
@@ -119,14 +127,20 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         "again if you need the original data]"
     )
 
-    def __init__(self, tools: list[BaseTool]) -> None:
+    def __init__(self, tools: list[BaseTool], *, max_tool_calls: int) -> None:
         """Tools are injected (loaded by the composition root — see
         `tools/mcp_clients.py`), not constructed here: graph/subgraph
         construction must stay side-effect-free, and MCP tool loading is
-        inherently I/O."""
+        inherently I/O. `max_tool_calls` is keyword-only and required: every
+        concrete subclass's own `__init__` resolves its own guardrail field
+        from `Settings.guardrails` and passes it through explicitly, rather
+        than this base class reaching into `Settings` for a value it has no
+        way to know which field belongs to which subclass."""
         settings = get_settings()
         self._tools = tools
         self._settings = settings
+        self.max_tool_calls = max_tool_calls
+        self._structured_output_max_attempts = settings.guardrails.structured_output_max_attempts
         self._primary_model = create_chat_model(self.llm_config.primary, settings)
         self._fallback_model = create_chat_model(self.llm_config.fallback, settings)
 
@@ -200,7 +214,15 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         it's the template-method contact point tests exercise directly (see
         `tests/graph/nodes/test_agent_subgraph.py`), the same way
         `TriageNode.execute()` is a public override point despite existing
-        purely to be called by graph wiring."""
+        purely to be called by graph wiring.
+
+        Checks the run's budget (`check_budget`) before `prepare()` runs --
+        this subgraph's own node-entry equivalent of `TriageNode.__call__`'s
+        check. A multi-call loop additionally re-checks before every
+        in-loop model turn via `BudgetGuardMiddleware` (`_middleware()`
+        below), since this one entry check can't see a mid-loop overrun
+        coming."""
+        check_budget(state["run_meta"], node_name=self.name)
         log.info("agent_subgraph_started", node=self.name)
         initial_messages = self.prepare(state)
         if initial_messages is None:
@@ -212,14 +234,22 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
 
     def _middleware(
         self,
-    ) -> list[ContextEditingMiddleware | ToolCallLimitMiddleware | ModelFallbackMiddleware]:
-        """`ContextEditingMiddleware` first (outermost): `ToolCallLimitMiddleware`
-        only implements `after_model`, never `wrap_model_call`, so its position
-        relative to the other two is inert either way. `ModelFallbackMiddleware`
-        does participate in `wrap_model_call` -- placing the context edit
-        outermost means its (deterministic, cheap) clearing pass is computed
-        once per turn and reused by any same-turn fallback retry, rather than
-        recomputed per attempt.
+    ) -> list[
+        ContextEditingMiddleware
+        | ToolCallLimitMiddleware
+        | ModelFallbackMiddleware
+        | BudgetGuardMiddleware
+    ]:
+        """`BudgetGuardMiddleware` first (outermost): a budget check should
+        run before any other middleware's own work for the turn (context
+        editing, fallback) is spent on a call that's about to be aborted
+        anyway. `ContextEditingMiddleware` next: `ToolCallLimitMiddleware`
+        only implements `after_model`, never `wrap_model_call`, so its
+        position relative to the other two is inert either way.
+        `ModelFallbackMiddleware` does participate in `wrap_model_call` --
+        placing the context edit ahead of it means its (deterministic,
+        cheap) clearing pass is computed once per turn and reused by any
+        same-turn fallback retry, rather than recomputed per attempt.
 
         `ContextEditingMiddleware.wrap_model_call` only edits the ephemeral
         outgoing request for one model call -- it never returns a state
@@ -229,6 +259,7 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         this middleware at all, which is why it applies the same
         `ClearToolUsesEdit` logic itself, via `clamp_trajectory_for_model_call`."""
         return [
+            BudgetGuardMiddleware(node_name=self.name),
             ContextEditingMiddleware(
                 edits=(
                     ClearToolUsesEdit(
@@ -258,6 +289,11 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
         )
 
     async def summarize_node(self, state: AgentLoopState) -> _LoopUpdate:
+        # This call sits outside build_agent()'s create_agent loop, so
+        # BudgetGuardMiddleware never runs over it either -- re-check here,
+        # immediately before the one LLM call this node makes, the same way
+        # prepare_node checks before entering the loop at all.
+        check_budget(state["run_meta"], node_name=self.name)
         # A parallel tool-call batch that straddles the cap can leave some
         # "allowed" calls counted by ToolCallLimitMiddleware but never
         # actually run, with no ToolMessage — patch those in (transiently,
@@ -281,7 +317,11 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
             placeholder=self.context_edit_placeholder,
         )
         result = await call_structured(
-            self._primary_model, self._fallback_model, clamped_messages, self.summary_schema
+            self._primary_model,
+            self._fallback_model,
+            clamped_messages,
+            self.summary_schema,
+            max_attempts=self._structured_output_max_attempts,
         )
         return _LoopUpdate(
             summary=result.parsed,

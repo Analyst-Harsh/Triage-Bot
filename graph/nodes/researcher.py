@@ -2,16 +2,16 @@ from datetime import UTC, datetime
 from typing import ClassVar
 
 from langchain_core.messages import BaseMessage
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
+from config.settings import get_settings
 from graph.nodes.agent_subgraph import AgentSubgraph
 from graph.nodes.node_names import NodeName
 from graph.schemas import ResearchFindings, ResearchSummary, RunStatus, ToolCallRecord
 from graph.state import TriageState, TriageStateUpdate
 from llm.config import LLMEndpointConfig, NodeLLMConfig
 from prompts.researcher import build_investigation_message, build_researcher_system_prompt
-
-RESEARCHER_MAX_TOOL_CALLS = 5
 
 
 class ResearcherSubgraph(AgentSubgraph[ResearchSummary]):
@@ -33,7 +33,6 @@ class ResearcherSubgraph(AgentSubgraph[ResearchSummary]):
         primary=LLMEndpointConfig(provider="openai", model="gpt-5.4-nano"),
         fallback=LLMEndpointConfig(provider="openai", model="gpt-5-nano"),
     )
-    max_tool_calls: ClassVar[int] = RESEARCHER_MAX_TOOL_CALLS
     # Typed as the base's `type[BaseModel]`, not `type[ResearchSummary]`:
     # `ClassVar` can't be parameterized by a type variable (the class's own
     # `SummaryT`), so a narrower override would violate pyright strict's
@@ -41,6 +40,9 @@ class ResearcherSubgraph(AgentSubgraph[ResearchSummary]):
     # actually get `ResearchSummary`-typed access (see `_assemble_node`'s
     # cast in agent_subgraph.py).
     summary_schema: ClassVar[type[BaseModel]] = ResearchSummary
+
+    def __init__(self, tools: list[BaseTool]) -> None:
+        super().__init__(tools, max_tool_calls=get_settings().guardrails.researcher_max_tool_calls)
 
     def system_prompt(self) -> str:
         return build_researcher_system_prompt([tool.name for tool in self._tools])

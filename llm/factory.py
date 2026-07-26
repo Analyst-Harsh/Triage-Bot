@@ -23,14 +23,14 @@ def create_chat_model(config: LLMEndpointConfig, settings: Settings) -> BaseChat
                 model=config.model,  # pyright: ignore[reportCallIssue]
                 temperature=config.temperature,
                 api_key=settings.anthropic_api_key,
-                timeout=settings.llm_request_timeout_seconds,
-                max_retries=settings.llm_max_retries,
+                timeout=settings.guardrails.llm_request_timeout_seconds,
+                max_retries=settings.guardrails.llm_max_retries,
             )
         case "openai":
             return ChatOpenAI(
                 model=config.model,  # pyright: ignore[reportCallIssue]
                 temperature=config.temperature,
                 api_key=settings.openai_api_key,
-                timeout=settings.llm_request_timeout_seconds,
-                max_retries=settings.llm_max_retries,
+                timeout=settings.guardrails.llm_request_timeout_seconds,
+                max_retries=settings.guardrails.llm_max_retries,
             )

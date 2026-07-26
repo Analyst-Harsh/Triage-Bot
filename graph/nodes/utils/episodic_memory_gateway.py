@@ -45,8 +45,8 @@ class EpisodicMemoryGateway:
         issue: IssuePayload,
         planner_output: PlannerOutput,
         draft_actions: list[DraftedAction],
-        risk_assessment: RiskAssessment,
-        post_results: PostResults,
+        risk_assessment: RiskAssessment | None,
+        post_results: PostResults | None,
         outcome: RunStatus,
     ) -> None:
         try:

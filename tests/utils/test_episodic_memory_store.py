@@ -257,6 +257,48 @@ async def test_save_episode_calls_aput_with_namespace_key_value_index() -> None:
     assert index == ["issue_text"]
 
 
+async def test_save_episode_with_none_risk_assessment_and_post_results() -> None:
+    """The spam-rejection path (`SpamRejectedNode`) never reaches drafting/
+    risk-check/posting -- `risk_assessment`/`post_results` are `None`, and
+    `risk_levels` degrades to `[]` rather than raising."""
+    store, fake = make_store()
+    run_id = uuid4()
+
+    await store.save_episode(
+        run_id=run_id,
+        issue=make_issue(),
+        planner_output=make_planner_output(issue_type=IssueType.SPAM_OR_ABUSE),
+        draft_actions=[],
+        risk_assessment=None,
+        post_results=None,
+        outcome=RunStatus.REJECTED,
+    )
+
+    namespace, key, value, index = fake.aput_calls[0]
+    assert namespace == ("episodes", "octo/repo")
+    assert key == str(run_id)
+    assert value["risk_levels"] == []
+    assert value["post_results"] is None
+    assert value["outcome"] == "rejected"
+    assert index == ["issue_text"]
+
+
+async def test_find_similar_reads_back_a_record_with_post_results_none() -> None:
+    """Round-trips the spam-rejection write shape back through
+    `_item_to_hit`: `actions_taken`/`action_results` both degrade to `[]`,
+    and no rejection note is folded in (there's no `post_results` to read
+    one from)."""
+    value = make_value(actions_taken=[], risk_levels=[], post_results=None, outcome="rejected")
+    store, _ = make_store(search_result=[make_search_item(value=value)])
+
+    hits = await store.find_similar(make_issue(), top_k=3)
+
+    assert len(hits) == 1
+    assert hits[0].actions_taken == []
+    assert hits[0].outcome == RunStatus.REJECTED
+    assert hits[0].summary == value["issue_summary"]
+
+
 async def test_save_episode_wraps_connection_error() -> None:
     store, _ = make_store(raise_error=psycopg.OperationalError("connection refused"))
 

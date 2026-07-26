@@ -47,6 +47,8 @@ class _FakeResearcherSubgraph(ResearcherSubgraph):
     ) -> None:
         self._tools = tools
         self._settings = settings
+        self.max_tool_calls = 5
+        self._structured_output_max_attempts = 2
         self._primary_model = primary_model
         self._fallback_model = fallback_model
 

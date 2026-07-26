@@ -31,6 +31,6 @@ class Episode(BaseModel):
     `EpisodicMemoryHit`'s display text."""
     actions_taken: list[DraftedAction]
     risk_levels: list[RiskLevel]
-    post_results: PostResults
+    post_results: PostResults | None = None
     outcome: RunStatus
     created_at: datetime

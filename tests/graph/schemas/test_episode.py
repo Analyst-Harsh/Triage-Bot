@@ -54,6 +54,37 @@ def test_json_round_trip() -> None:
     assert restored == episode
 
 
+def test_construction_with_post_results_none() -> None:
+    """A spam-rejected run (`SpamRejectedNode`) never reaches drafting/
+    risk-check/posting, so it writes an episode with `post_results=None`."""
+    episode = make_episode(
+        actions_taken=[],
+        risk_levels=[],
+        post_results=None,
+        outcome=RunStatus.REJECTED,
+    )
+    assert episode.post_results is None
+    assert episode.actions_taken == []
+
+
+def test_json_round_trip_with_post_results_none() -> None:
+    episode = make_episode(actions_taken=[], risk_levels=[], post_results=None)
+    restored = Episode.model_validate_json(episode.model_dump_json())
+    assert restored == episode
+    assert restored.post_results is None
+
+
+def test_deserializes_without_post_results_for_backward_compatibility() -> None:
+    """An episode written before `post_results` could be absent must still
+    deserialize -- it defaults to `None`."""
+    payload = make_episode().model_dump(mode="json")
+    del payload["post_results"]
+
+    restored = Episode.model_validate(payload)
+
+    assert restored.post_results is None
+
+
 def test_can_hold_multiple_actions_and_risk_levels() -> None:
     episode = make_episode(
         actions_taken=[

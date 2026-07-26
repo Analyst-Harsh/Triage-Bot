@@ -185,10 +185,11 @@ async def main() -> None:
             result = await resume_paused_run(graph, config, snapshot.interrupts[0].value)
         else:
             issue = github_client.fetch_issue(REPO_FULL_NAME, ISSUE_NUMBER)
+            guardrails = get_settings().guardrails
             state = create_initial_state(
                 issue,
-                max_iterations=10,
-                max_cost_usd=1.0,
+                max_iterations=guardrails.default_max_iterations,
+                max_cost_usd=guardrails.default_max_cost_usd,
                 dry_run=False,
                 trace_id=trace_id,
             )

@@ -15,17 +15,18 @@ import pytest
 from e2b import ALL_TRAFFIC, CommandExitException, CommandResult, FileType
 from pydantic import SecretStr
 
+from config.guardrail_settings import GuardrailSettings
 from config.settings import Settings
 from graph.schemas import SandboxAttempt, SandboxResult
 from tools import sandbox as sandbox_module
-from tools.sandbox import (
-    MAX_SANDBOX_BASELINE_ATTEMPTS,
-    MAX_SANDBOX_FIX_ATTEMPTS,
-    MAX_SANDBOX_REPRO_ATTEMPTS,
-    SandboxHandle,
-    build_sandbox_tools,
-    sandbox_toolset,
-)
+from tools.sandbox import SandboxHandle, build_sandbox_tools, sandbox_toolset
+
+# Small, fast-to-exhaust caps for tests that specifically exercise the
+# attempt-cap paths -- rather than the real (much larger) production
+# defaults, which would need many more scripted commands per test to reach.
+MAX_SANDBOX_BASELINE_ATTEMPTS = 2
+MAX_SANDBOX_FIX_ATTEMPTS = 2
+MAX_SANDBOX_REPRO_ATTEMPTS = 2
 
 # ---------------------------------------------------------------------------
 # Settings / fixtures
@@ -33,17 +34,24 @@ from tools.sandbox import (
 
 
 def make_settings(**overrides: Any) -> Settings:
-    defaults: dict[str, Any] = {
-        "e2b_api_key": SecretStr("e2b_test_key"),
+    guardrail_overrides: dict[str, Any] = {
         "e2b_sandbox_session_timeout_seconds": 900.0,
         "e2b_install_timeout_seconds": 300.0,
         "e2b_test_command_timeout_seconds": 180.0,
         "e2b_max_billed_seconds_per_run": 600.0,
+        "sandbox_max_baseline_attempts": MAX_SANDBOX_BASELINE_ATTEMPTS,
+        "sandbox_max_fix_attempts": MAX_SANDBOX_FIX_ATTEMPTS,
+        "sandbox_max_repro_attempts": MAX_SANDBOX_REPRO_ATTEMPTS,
+    }
+    guardrail_overrides.update(overrides.pop("guardrails", {}))
+    defaults: dict[str, Any] = {
+        "e2b_api_key": SecretStr("e2b_test_key"),
         "e2b_cost_per_second_usd": 0.000028,
         "e2b_restrict_network": True,
         "drafter_file_read_max_chars": 16_000,
         "drafter_test_log_success_max_chars": 500,
         "drafter_test_log_failure_max_chars": 6_000,
+        "guardrails": GuardrailSettings(**guardrail_overrides),
     }
     defaults.update(overrides)
     return Settings(**defaults)  # pyright: ignore[reportArgumentType]
@@ -650,9 +658,14 @@ async def test_run_tests_refuses_repro_over_the_cap(monkeypatch: pytest.MonkeyPa
 async def test_run_tests_refuses_over_billed_seconds_ceiling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = make_settings(e2b_max_billed_seconds_per_run=0.0)
+    # `e2b_max_billed_seconds_per_run` must be > 0 (GuardrailSettings'
+    # own validation), so "budget already exhausted" is simulated by
+    # advancing `_billed_seconds` past a tiny positive ceiling instead of
+    # using a literal `0.0` ceiling.
+    settings = make_settings(guardrails={"e2b_max_billed_seconds_per_run": 0.01})
     handle, _factory, fake_sandbox, _github = make_handle(monkeypatch, settings=settings)
     await handle.ensure_ready()
+    handle._billed_seconds = 0.01  # pyright: ignore[reportPrivateUsage]
     calls_before = len(fake_sandbox.commands.calls)
 
     result = await handle.run_tests(kind="baseline", test_command="pytest")
@@ -668,7 +681,9 @@ async def test_install_dependencies_caps_timeout_at_remaining_budget(
     install timeout), the timeout actually passed to the sandbox command
     must be capped at ~5s -- otherwise a single slow install could overshoot
     the budget by minutes before the next gate check fires."""
-    settings = make_settings(e2b_install_timeout_seconds=300.0, e2b_max_billed_seconds_per_run=5.0)
+    settings = make_settings(
+        guardrails={"e2b_install_timeout_seconds": 300.0, "e2b_max_billed_seconds_per_run": 5.0}
+    )
     handle, _factory, fake_sandbox, _github = make_handle(monkeypatch, settings=settings)
     await handle.ensure_ready()
 
@@ -682,7 +697,10 @@ async def test_run_tests_caps_timeout_at_remaining_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = make_settings(
-        e2b_test_command_timeout_seconds=180.0, e2b_max_billed_seconds_per_run=5.0
+        guardrails={
+            "e2b_test_command_timeout_seconds": 180.0,
+            "e2b_max_billed_seconds_per_run": 5.0,
+        }
     )
     handle, _factory, fake_sandbox, _github = make_handle(monkeypatch, settings=settings)
     await handle.ensure_ready()

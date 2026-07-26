@@ -36,10 +36,17 @@ class LLMNode(TriageNode, ABC):
         settings = get_settings()
         self._primary_model = create_chat_model(self.llm_config.primary, settings)
         self._fallback_model = create_chat_model(self.llm_config.fallback, settings)
+        self._structured_output_max_attempts = settings.guardrails.structured_output_max_attempts
 
     async def call_structured[T](
         self, messages: Sequence[BaseMessage], schema: type[T]
     ) -> LLMResult[T]:
         """Thin delegate onto `llm.structured.call_structured` — see that
         function's docstring for the fallback/cost-accounting behavior."""
-        return await call_structured(self._primary_model, self._fallback_model, messages, schema)
+        return await call_structured(
+            self._primary_model,
+            self._fallback_model,
+            messages,
+            schema,
+            max_attempts=self._structured_output_max_attempts,
+        )

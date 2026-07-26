@@ -5,6 +5,7 @@ from typing import ClassVar
 import structlog
 
 from graph.nodes.node_names import NodeName
+from graph.nodes.utils.budget_guard import check_budget
 from graph.state import TriageState, TriageStateUpdate
 from observability.tracing import node_span
 
@@ -19,9 +20,11 @@ class TriageNode(ABC):
     into the returned partial update (nodes construct/validate the Pydantic
     model, then write it into the TypedDict slot).
 
-    `__call__` is the thin, uniform seam LangGraph actually invokes: it bumps
-    the `run_meta.iteration_count` guardrail counter after a successful
-    `execute()`, and wraps the call in a Langfuse span
+    `__call__` is the thin, uniform seam LangGraph actually invokes: it
+    checks the run's cost/iteration budget (`check_budget`,
+    `graph/nodes/utils/budget_guard.py`) before `execute()` is allowed to
+    start, bumps the `run_meta.iteration_count` guardrail counter after a
+    successful `execute()`, and wraps the call in a Langfuse span
     (`observability.tracing.node_span`) enriched with this node's own
     duration/cost accounting — the cross-cutting concerns every node needs,
     applied once here rather than per subclass. It also marks that span
@@ -61,6 +64,7 @@ class TriageNode(ABC):
             log.info("node_started", node=self.name)
             started_at = time.monotonic()
             async with node_span(self.name) as span:
+                check_budget(run_meta, node_name=self.name)
                 update = await self.execute(state)
                 duration_ms = round((time.monotonic() - started_at) * 1000, 2)
                 base_run_meta = update.get("run_meta", state["run_meta"])

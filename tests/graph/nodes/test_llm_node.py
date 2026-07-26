@@ -31,6 +31,7 @@ class _StubLLMNode(LLMNode):
     ) -> None:
         self._primary_model = primary_model
         self._fallback_model = fallback_model
+        self._structured_output_max_attempts = 2
 
     async def execute(self, state: TriageState) -> TriageStateUpdate:  # noqa: ARG002
         return TriageStateUpdate()

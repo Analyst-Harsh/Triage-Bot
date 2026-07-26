@@ -5,8 +5,10 @@ from structlog import get_logger
 
 from graph.nodes.llm_node import LLMNode
 from graph.nodes.node_names import NodeName
+from graph.nodes.utils.injection_pattern_scanner import InjectionPatternScanner, extract_urls
 from graph.schemas import (
     ActionRiskAssessment,
+    Evidence,
     RiskAssessment,
     RiskJudgmentBatch,
     RiskLevel,
@@ -14,6 +16,7 @@ from graph.schemas import (
 )
 from graph.state import TriageState, TriageStateUpdate
 from llm.config import LLMEndpointConfig, NodeLLMConfig
+from prompts.drafter import public_facing_text
 from prompts.risk_check import build_risk_judgment_messages
 
 log = get_logger(__name__)
@@ -27,12 +30,29 @@ def _max_risk_level(a: RiskLevel, b: RiskLevel) -> RiskLevel:
     return a if _RISK_ORDER[a] >= _RISK_ORDER[b] else b
 
 
+def _evidence_urls(evidence: list[Evidence]) -> set[str]:
+    urls: set[str] = set()
+    for item in evidence:
+        urls |= extract_urls(item.reference)
+        urls |= extract_urls(item.snippet)
+    return urls
+
+
 class RiskCheckNode(LLMNode):
     """Tags every drafted action with its own risk level. `label` and
     `code_fix` are resolved by hardcoded policy (no judgment call, no LLM
     spend); `comment`/`close` actions are batched into a single LLM call,
     since deciding whether a given comment or close is "routine" vs.
     "substantive" is a genuine judgment call the other two aren't.
+
+    After every action has a level, `InjectionPatternScanner` runs a second,
+    deterministic pass over every action still resolved to `RiskLevel.LOW`
+    (the only level that skips human review): a hit there bumps that one
+    action to `MEDIUM`, exactly like the `unsupported_claims` floor below --
+    it never lowers a level, only raises one already-LOW action into human
+    review. See that scanner's own docstring for why this lives here rather
+    than in a dedicated node, and why it's deterministic rather than a
+    second LLM call.
     """
 
     name: ClassVar[NodeName] = NodeName.RISK_CHECK
@@ -40,6 +60,10 @@ class RiskCheckNode(LLMNode):
         primary=LLMEndpointConfig(provider="openai", model="gpt-5.4-nano", temperature=0.0),
         fallback=LLMEndpointConfig(provider="openai", model="gpt-5-nano", temperature=0.0),
     )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._scanner = InjectionPatternScanner()
 
     async def execute(self, state: TriageState) -> TriageStateUpdate:
         draft = state["draft"]
@@ -94,6 +118,32 @@ class RiskCheckNode(LLMNode):
                     reasoning=judgment.reasoning,
                 )
 
+        research_findings = state["research_findings"]
+        evidence_urls = _evidence_urls(research_findings.evidence if research_findings else [])
+        issue = state["issue"]
+        # Scans every action with public-facing text, not just LOW ones --
+        # a hit on an already-MEDIUM/HIGH action changes nothing, but is
+        # still logged (see injection_hits below) as tuning data for the
+        # phrase list's real-world false-positive/negative rate.
+        injection_hits: dict[int, list[str]] = {}
+        for index, drafted in enumerate(draft.actions):
+            text = public_facing_text(drafted.action)
+            if text is None:
+                continue
+            signals = self._scanner.scan(
+                text, issue_title=issue.title, issue_body=issue.body, evidence_urls=evidence_urls
+            )
+            if not signals:
+                continue
+            injection_hits[index] = signals
+            if results[index].level == RiskLevel.LOW:
+                existing = results[index]
+                results[index] = ActionRiskAssessment(
+                    level=RiskLevel.MEDIUM,
+                    risk_factors=[*existing.risk_factors, *signals],
+                    reasoning=f"{existing.reasoning} Bumped to MEDIUM: {'; '.join(signals)}.",
+                )
+
         risk_assessment = RiskAssessment(
             action_assessments=[results[i] for i in range(len(draft.actions))],
             assessed_at=datetime.now(UTC),
@@ -107,6 +157,7 @@ class RiskCheckNode(LLMNode):
             estimated_cost_usd=cost_usd,
             cache_read_tokens=cache_read_tokens,
             cache_creation_tokens=cache_creation_tokens,
+            injection_scanner_hits=injection_hits,
         )
 
         update: TriageStateUpdate = {

@@ -75,8 +75,8 @@ class BaseEpisodicMemoryStore(ABC):
         issue: IssuePayload,
         planner_output: PlannerOutput,
         draft_actions: list[DraftedAction],
-        risk_assessment: RiskAssessment,
-        post_results: PostResults,
+        risk_assessment: RiskAssessment | None,
+        post_results: PostResults | None,
         outcome: RunStatus,
     ) -> None:
         raise NotImplementedError
@@ -102,8 +102,8 @@ class NullEpisodicMemoryStore(BaseEpisodicMemoryStore):
         issue: IssuePayload,  # noqa: ARG002
         planner_output: PlannerOutput,  # noqa: ARG002
         draft_actions: list[DraftedAction],  # noqa: ARG002
-        risk_assessment: RiskAssessment,  # noqa: ARG002
-        post_results: PostResults,  # noqa: ARG002
+        risk_assessment: RiskAssessment | None,  # noqa: ARG002
+        post_results: PostResults | None,  # noqa: ARG002
         outcome: RunStatus,  # noqa: ARG002
     ) -> None:
         return None
@@ -142,8 +142,8 @@ class EpisodicMemoryStore(BaseEpisodicMemoryStore):
         issue: IssuePayload,
         planner_output: PlannerOutput,
         draft_actions: list[DraftedAction],
-        risk_assessment: RiskAssessment,
-        post_results: PostResults,
+        risk_assessment: RiskAssessment | None,
+        post_results: PostResults | None,
         outcome: RunStatus,
     ) -> None:
         episode = Episode(
@@ -154,7 +154,9 @@ class EpisodicMemoryStore(BaseEpisodicMemoryStore):
             issue_type=planner_output.issue_type,
             issue_text=_issue_text(issue),
             actions_taken=draft_actions,
-            risk_levels=[a.level for a in risk_assessment.action_assessments],
+            risk_levels=(
+                [a.level for a in risk_assessment.action_assessments] if risk_assessment else []
+            ),
             post_results=post_results,
             outcome=outcome,
             created_at=datetime.now(UTC),
@@ -186,8 +188,10 @@ def _item_to_hit(item: SearchItem) -> EpisodicMemoryHit:
     because Y" signal actually surfaces, without a dedicated field."""
     value: dict[str, Any] = item.value
     actions_taken: list[dict[str, Any]] = value["actions_taken"]
-    post_results: dict[str, Any] = value["post_results"]
-    action_results: list[dict[str, Any]] = post_results["action_results"]
+    post_results: dict[str, Any] | None = value.get("post_results")
+    action_results: list[dict[str, Any]] = (
+        post_results["action_results"] if post_results is not None else []
+    )
 
     actions = [
         EpisodicActionOutcome(
@@ -230,8 +234,8 @@ async def episodic_memory_store(settings: Settings) -> AsyncGenerator[BaseEpisod
     embeddings = OpenAIEmbeddings(
         model=settings.embedding_model,
         openai_api_key=settings.openai_api_key,  # pyright: ignore[reportCallIssue]
-        request_timeout=settings.llm_request_timeout_seconds,  # pyright: ignore[reportCallIssue]
-        max_retries=settings.llm_max_retries,
+        request_timeout=settings.guardrails.llm_request_timeout_seconds,  # pyright: ignore[reportCallIssue]
+        max_retries=settings.guardrails.llm_max_retries,
     )
     index_config = PostgresIndexConfig(dims=settings.embedding_dimensions, embed=embeddings)
 

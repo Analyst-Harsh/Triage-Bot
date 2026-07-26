@@ -23,6 +23,7 @@ from graph.nodes.risk_check import RiskCheckNode
 from graph.nodes.utils.action_executor import ActionExecutor
 from graph.nodes.utils.approval_request_builder import ApprovalRequestBuilder
 from graph.nodes.utils.episodic_memory_gateway import EpisodicMemoryGateway
+from graph.nodes.utils.injection_pattern_scanner import InjectionPatternScanner
 from graph.schemas import (
     ActionPostResult,
     ActionRiskJudgment,
@@ -208,6 +209,7 @@ class _FakePlannerNode(PlannerNode):
     ) -> None:
         self._primary_model = primary_model
         self._fallback_model = fallback_model
+        self._structured_output_max_attempts = 2
         self._memory_gateway = EpisodicMemoryGateway(memory_store or NullEpisodicMemoryStore())
 
 
@@ -247,6 +249,8 @@ class _FakeRiskCheckNode(RiskCheckNode):
     ) -> None:
         self._primary_model = primary_model
         self._fallback_model = fallback_model
+        self._structured_output_max_attempts = 2
+        self._scanner = InjectionPatternScanner()
 
 
 def make_fake_risk_check_node(*, parsed_result: RiskJudgmentBatch | None = None) -> RiskCheckNode:
@@ -280,6 +284,8 @@ class _FakeResearcherSubgraph(ResearcherSubgraph):
     def __init__(self, tools: list[BaseTool] | None = None) -> None:
         self._tools = tools or []
         self._settings = get_settings()
+        self.max_tool_calls = 5
+        self._structured_output_max_attempts = 2
         self._primary_model = make_fake_chat_model(
             model_name="gpt-4o-mini",
             parsed_result=ResearchSummary(summary="Test double research summary.", confidence=0.9),
@@ -310,6 +316,8 @@ class _FakeDrafterSubgraph(DrafterSubgraph):
     ) -> None:
         self._tools = tools or []
         self._sandbox_handle = sandbox_handle
+        self.max_tool_calls = 50
+        self._structured_output_max_attempts = 2
         self._primary_model = make_fake_chat_model(
             model_name="gpt-4o-mini",
             parsed_results_by_schema={

@@ -2,6 +2,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
+from config.guardrail_settings import GuardrailSettings
 from config.settings import Settings
 from llm.config import LLMEndpointConfig
 from llm.factory import create_chat_model
@@ -11,8 +12,7 @@ def _settings(**overrides: object) -> Settings:
     defaults: dict[str, object] = {
         "anthropic_api_key": SecretStr("sk-ant-test"),
         "openai_api_key": SecretStr("sk-oai-test"),
-        "llm_request_timeout_seconds": 45.0,
-        "llm_max_retries": 3,
+        "guardrails": GuardrailSettings(llm_request_timeout_seconds=45.0, llm_max_retries=3),
     }
     defaults.update(overrides)
     return Settings(**defaults)  # pyright: ignore[reportArgumentType]
