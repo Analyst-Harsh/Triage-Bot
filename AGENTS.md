@@ -91,5 +91,6 @@ uv run lefthook run pre-push     # run the pre-push hook set manually against th
 | Security threat model, secrets rationale, residual risk | `docs/agent/security.md` |
 | Design-pattern rationale, full engineering-standards detail | `docs/agent/engineering-standards.md` |
 | State schema, module layout, testing/typing conventions | `docs/agent/architecture-conventions.md` |
+| Eval suite: Langfuse-only data flow, grading, scope | `docs/agent/evals.md` |
 | Responsible disclosure (external security reports) | `SECURITY.md` |
 | Local setup, quickstart | `README.md` |

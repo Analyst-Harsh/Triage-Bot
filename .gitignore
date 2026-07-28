@@ -12,3 +12,4 @@ htmlcov/
 *.db-wal
 *.db-shm
 /results/
+/evals/.cache/
