@@ -23,7 +23,7 @@
 | graph/nodes/researcher.py                        |       41 |        1 |     98% |        50 |
 | graph/nodes/risk\_check.py                       |       78 |        5 |     94% |36-37, 65-66, 71 |
 | graph/nodes/routing.py                           |       18 |        0 |    100% |           |
-| graph/nodes/spam\_rejected.py                    |       23 |        0 |    100% |           |
+| graph/nodes/spam\_close.py                       |       21 |        0 |    100% |           |
 | graph/nodes/trajectory.py                        |       73 |        0 |    100% |           |
 | graph/nodes/utils/\_\_init\_\_.py                |        0 |        0 |    100% |           |
 | graph/nodes/utils/action\_executor.py            |       46 |        1 |     98% |       128 |
@@ -72,7 +72,7 @@
 | utils/diff\_applier.py                           |      105 |        8 |     92% |35, 51, 67-68, 90, 96, 116, 200 |
 | utils/episodic\_memory\_store.py                 |       68 |       10 |     85% |68, 82, 230-248 |
 | utils/github\_client.py                          |       71 |        1 |     99% |       148 |
-| **TOTAL**                                        | **2171** |  **117** | **95%** |           |
+| **TOTAL**                                        | **2169** |  **117** | **95%** |           |
 
 
 ## Setup coverage badge
