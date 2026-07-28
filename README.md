@@ -12,15 +12,15 @@
 | graph/checkpointer.py                            |       15 |        0 |    100% |           |
 | graph/errors.py                                  |        8 |        0 |    100% |           |
 | graph/nodes/\_\_init\_\_.py                      |       13 |        0 |    100% |           |
-| graph/nodes/agent\_subgraph.py                   |       97 |       10 |     90% |139-145, 153, 163, 188 |
+| graph/nodes/agent\_subgraph.py                   |       98 |       10 |     90% |141-147, 155, 165, 190 |
 | graph/nodes/approval\_queue.py                   |       62 |        1 |     98% |       118 |
 | graph/nodes/auto\_post.py                        |       43 |        3 |     93% | 39-40, 95 |
 | graph/nodes/base.py                              |       30 |        1 |     97% |       104 |
-| graph/nodes/drafter.py                           |       78 |        3 |     96% |96-97, 276 |
+| graph/nodes/drafter.py                           |       78 |        3 |     96% |96-97, 277 |
 | graph/nodes/llm\_node.py                         |       19 |        4 |     79% |     36-39 |
 | graph/nodes/node\_names.py                       |        9 |        0 |    100% |           |
 | graph/nodes/planner.py                           |       27 |        2 |     93% |     33-34 |
-| graph/nodes/researcher.py                        |       40 |        1 |     98% |        45 |
+| graph/nodes/researcher.py                        |       41 |        1 |     98% |        50 |
 | graph/nodes/risk\_check.py                       |       78 |        5 |     94% |36-37, 65-66, 71 |
 | graph/nodes/routing.py                           |       18 |        0 |    100% |           |
 | graph/nodes/spam\_rejected.py                    |       23 |        0 |    100% |           |
@@ -34,19 +34,20 @@
 | graph/nodes/utils/injection\_pattern\_scanner.py |       32 |        1 |     97% |       118 |
 | graph/schemas/\_\_init\_\_.py                    |       16 |        0 |    100% |           |
 | graph/schemas/actions.py                         |       20 |        0 |    100% |           |
-| graph/schemas/approval\_decision.py              |        8 |        0 |    100% |           |
-| graph/schemas/approval\_request.py               |       16 |        0 |    100% |           |
-| graph/schemas/draft.py                           |       12 |        0 |    100% |           |
-| graph/schemas/enums.py                           |       38 |        0 |    100% |           |
+| graph/schemas/approval\_decision.py              |        7 |        0 |    100% |           |
+| graph/schemas/approval\_request.py               |       17 |        0 |    100% |           |
+| graph/schemas/base.py                            |        3 |        0 |    100% |           |
+| graph/schemas/draft.py                           |       13 |        0 |    100% |           |
+| graph/schemas/enums.py                           |       42 |        0 |    100% |           |
 | graph/schemas/episode.py                         |        9 |        0 |    100% |           |
-| graph/schemas/grounding.py                       |        3 |        0 |    100% |           |
-| graph/schemas/issue.py                           |        7 |        0 |    100% |           |
-| graph/schemas/memory.py                          |        6 |        0 |    100% |           |
-| graph/schemas/planner.py                         |       10 |        0 |    100% |           |
-| graph/schemas/post\_result.py                    |        7 |        0 |    100% |           |
-| graph/schemas/research.py                        |       23 |        0 |    100% |           |
-| graph/schemas/risk.py                            |       12 |        0 |    100% |           |
-| graph/schemas/run\_meta.py                       |       17 |        0 |    100% |           |
+| graph/schemas/grounding.py                       |        4 |        0 |    100% |           |
+| graph/schemas/issue.py                           |        8 |        0 |    100% |           |
+| graph/schemas/memory.py                          |        7 |        0 |    100% |           |
+| graph/schemas/planner.py                         |       11 |        0 |    100% |           |
+| graph/schemas/post\_result.py                    |        8 |        0 |    100% |           |
+| graph/schemas/research.py                        |       25 |        0 |    100% |           |
+| graph/schemas/risk.py                            |       15 |        0 |    100% |           |
+| graph/schemas/run\_meta.py                       |       18 |        0 |    100% |           |
 | graph/schemas/sandbox.py                         |        5 |        0 |    100% |           |
 | graph/state.py                                   |        9 |        0 |    100% |           |
 | llm/\_\_init\_\_.py                              |        6 |        0 |    100% |           |
@@ -71,7 +72,7 @@
 | utils/diff\_applier.py                           |      105 |        8 |     92% |35, 51, 67-68, 90, 96, 116, 200 |
 | utils/episodic\_memory\_store.py                 |       68 |       10 |     85% |68, 82, 230-248 |
 | utils/github\_client.py                          |       71 |        1 |     99% |       148 |
-| **TOTAL**                                        | **2150** |  **117** | **95%** |           |
+| **TOTAL**                                        | **2171** |  **117** | **95%** |           |
 
 
 ## Setup coverage badge
