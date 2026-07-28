@@ -41,7 +41,7 @@ class PlannerNode(LLMNode):
             issue_text=format_issue_for_prompt(issue),
             episodic_context_text=format_episodic_context_for_prompt(hits),
         )
-        result = await self.call_structured(messages, PlannerClassification)
+        result = await self.call_structured(messages, PlannerClassification, method="json_schema")
         output = PlannerOutput(**result.parsed.model_dump(), classified_at=datetime.now(UTC))
 
         cache_hit_ratio = (

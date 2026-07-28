@@ -64,3 +64,11 @@ def test_classification_confidence_out_of_bounds_rejected(confidence: float) -> 
 def test_classification_confidence_boundary_values_accepted(confidence: float) -> None:
     classification = make_planner_classification(classification_confidence=confidence)
     assert classification.classification_confidence == confidence
+
+
+def test_classification_rejects_unexpected_field() -> None:
+    """`PlannerClassification` inherits `StrictBaseModel`'s `extra="forbid"`
+    -- an unexpected field (e.g. a stray key the model hallucinated into its
+    tool-call args) must be rejected outright, not silently dropped."""
+    with pytest.raises(ValidationError):
+        make_planner_classification(unexpected_field="surprise")

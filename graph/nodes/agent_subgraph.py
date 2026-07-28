@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Annotated, ClassVar, TypedDict, cast
+from typing import Annotated, ClassVar, Literal, TypedDict, cast
 
 import structlog
 from langchain.agents import create_agent  # pyright: ignore[reportUnknownVariableType]
@@ -92,6 +92,8 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
     name: ClassVar[NodeName]
     llm_config: ClassVar[NodeLLMConfig]
     summary_schema: ClassVar[type[BaseModel]]
+
+    summary_schema_method: ClassVar[Literal["function_calling", "json_schema"]] = "function_calling"
 
     max_tool_calls: int
     """Set in `__init__` from the caller (ultimately `Settings.guardrails`),
@@ -322,6 +324,7 @@ class AgentSubgraph[SummaryT: BaseModel](ABC):
             clamped_messages,
             self.summary_schema,
             max_attempts=self._structured_output_max_attempts,
+            method=self.summary_schema_method,
         )
         return _LoopUpdate(
             summary=result.parsed,

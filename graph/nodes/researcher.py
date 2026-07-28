@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
@@ -40,6 +40,11 @@ class ResearcherSubgraph(AgentSubgraph[ResearchSummary]):
     # actually get `ResearchSummary`-typed access (see `_assemble_node`'s
     # cast in agent_subgraph.py).
     summary_schema: ClassVar[type[BaseModel]] = ResearchSummary
+    # ResearchSummary has no discriminated union (unlike DrafterSubgraph's
+    # DraftProposal), so it can safely use OpenAI's strict json_schema mode
+    # for a real provider-side conformance guarantee -- see AgentSubgraph's
+    # summary_schema_method docstring.
+    summary_schema_method: ClassVar[Literal["function_calling", "json_schema"]] = "json_schema"
 
     def __init__(self, tools: list[BaseTool]) -> None:
         super().__init__(tools, max_tool_calls=get_settings().guardrails.researcher_max_tool_calls)

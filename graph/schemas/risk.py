@@ -1,22 +1,23 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from graph.schemas.base import StrictBaseModel
 from graph.schemas.enums import RiskLevel
 
 
-class ActionRiskAssessment(BaseModel):
+class ActionRiskAssessment(StrictBaseModel):
     """Persisted risk verdict for one drafted action. Positional, not
     indexed: item i here always assesses `draft.actions[i]`, mirroring every
     other per-item list in this schema layer (e.g. `DraftOutput.actions`
     itself)."""
 
     level: RiskLevel
-    risk_factors: list[str] = []
+    risk_factors: list[str] = Field(default_factory=list[str])
     reasoning: str
 
 
-class RiskAssessment(BaseModel):
+class RiskAssessment(StrictBaseModel):
     """Persisted container -- the type of `TriageState.risk_assessment`.
     `action_assessments` must be the same length as `draft.actions`, in the
     same order."""
@@ -25,7 +26,7 @@ class RiskAssessment(BaseModel):
     assessed_at: datetime
 
 
-class ActionRiskJudgment(BaseModel):
+class ActionRiskJudgment(StrictBaseModel):
     """LLM-facing: one judgment for one ambiguous (`comment`/`close`)
     action. Unlike `ActionRiskAssessment`, this carries an explicit index --
     the model is only shown the ambiguous subset of `draft.actions` (labels
@@ -34,7 +35,9 @@ class ActionRiskJudgment(BaseModel):
     complete list is."""
 
     action_index: int = Field(description="Position in the drafted actions list this judges.")
-    level: RiskLevel
+    level: RiskLevel = Field(
+        description="How much human scrutiny this action needs before it's safe to post."
+    )
     risk_factors: list[str] = Field(
         default=[],
         description=(
@@ -42,11 +45,13 @@ class ActionRiskJudgment(BaseModel):
             "'assertive tone', 'irreversible close'. Empty only if level is low."
         ),
     )
-    reasoning: str
+    reasoning: str = Field(description="Brief explanation for why this level was chosen.")
 
 
-class RiskJudgmentBatch(BaseModel):
+class RiskJudgmentBatch(StrictBaseModel):
     """LLM-facing container for the batched risk-judgment call: one
     judgment per ambiguous action shown this call."""
 
-    judgments: list[ActionRiskJudgment] = Field(min_length=1)
+    judgments: list[ActionRiskJudgment] = Field(
+        min_length=1, description="One judgment per ambiguous action shown this call."
+    )

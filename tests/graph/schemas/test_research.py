@@ -1,12 +1,21 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from graph.schemas import Evidence, ResearchFindings, ResearchSummary, ToolCallRecord
+import pytest
+from pydantic import ValidationError
+
+from graph.schemas import (
+    Evidence,
+    ResearchFindings,
+    ResearchSummary,
+    ResearchToolName,
+    ToolCallRecord,
+)
 
 
 def make_evidence(**overrides: Any) -> Evidence:
     defaults: dict[str, Any] = {
-        "source_type": "github",
+        "source_type": ResearchToolName.GITHUB,
         "reference": "https://github.com/octo/repo/pull/7",
         "snippet": "Fixed by adding a null check.",
         "relevance": 0.9,
@@ -55,7 +64,7 @@ def make_findings(**overrides: Any) -> ResearchFindings:
 
 def test_evidence_construction() -> None:
     evidence = make_evidence()
-    assert evidence.source_type == "github"
+    assert evidence.source_type == ResearchToolName.GITHUB
     assert evidence.sha == "abc123"
 
 
@@ -66,8 +75,16 @@ def test_evidence_json_round_trip() -> None:
 
 
 def test_evidence_sha_defaults_to_none_for_web_sources() -> None:
-    evidence = make_evidence(source_type="web", sha=None)
+    evidence = make_evidence(source_type=ResearchToolName.WEB, sha=None)
     assert evidence.sha is None
+
+
+def test_evidence_source_type_json_round_trip() -> None:
+    """`ResearchToolName` is a real `StrEnum` (not a bare `Literal`), so it
+    must round-trip through JSON exactly like the schema's other enums."""
+    evidence = make_evidence(source_type=ResearchToolName.WEB)
+    restored = Evidence.model_validate_json(evidence.model_dump_json())
+    assert restored.source_type is ResearchToolName.WEB
 
 
 def test_tool_call_record_construction() -> None:
@@ -84,7 +101,7 @@ def test_tool_call_record_json_round_trip() -> None:
 
 def test_research_summary_construction() -> None:
     summary = make_research_summary()
-    assert summary.evidence[0].source_type == "github"
+    assert summary.evidence[0].source_type == ResearchToolName.GITHUB
 
 
 def test_research_summary_json_round_trip() -> None:
@@ -95,7 +112,7 @@ def test_research_summary_json_round_trip() -> None:
 
 def test_findings_construction() -> None:
     findings = make_findings()
-    assert findings.evidence[0].source_type == "github"
+    assert findings.evidence[0].source_type == ResearchToolName.GITHUB
     assert findings.tools_used == ["github"]
 
 
@@ -103,3 +120,15 @@ def test_findings_json_round_trip() -> None:
     findings = make_findings()
     restored = ResearchFindings.model_validate_json(findings.model_dump_json())
     assert restored == findings
+
+
+def test_evidence_rejects_unexpected_field() -> None:
+    """`Evidence` inherits `StrictBaseModel`'s `extra="forbid"` -- an
+    unexpected field must be rejected outright, not silently dropped."""
+    with pytest.raises(ValidationError):
+        make_evidence(unexpected_field="surprise")
+
+
+def test_research_summary_rejects_unexpected_field() -> None:
+    with pytest.raises(ValidationError):
+        make_research_summary(unexpected_field="surprise")

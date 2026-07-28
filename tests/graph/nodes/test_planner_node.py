@@ -69,6 +69,28 @@ async def test_execute_classifies_bug_report(triage_state: TriageState) -> None:
     assert update["status"] == RunStatus.PLANNING
 
 
+async def test_execute_requests_json_schema_structured_output(
+    triage_state: TriageState,
+) -> None:
+    """`PlannerClassification` has no discriminated union, so the Planner
+    should opt into OpenAI's strict `json_schema` mode for a real
+    provider-side conformance guarantee rather than `function_calling`'s
+    best-effort bias."""
+    classification = PlannerClassification(
+        issue_type=IssueType.BUG,
+        classification_confidence=0.9,
+        investigation_plan=[],
+        reasoning="Test double classification.",
+    )
+    primary = make_fake_chat_model(model_name="gpt-4o-mini", parsed_result=classification)
+    fallback = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
+    node = _FakePlannerNode(primary_model=primary, fallback_model=fallback)
+
+    await node.execute(triage_state)
+
+    assert primary.received_structured_output_kwargs == [{"method": "json_schema"}]
+
+
 async def test_execute_classifies_feature_request(triage_state: TriageState) -> None:
     classification = PlannerClassification(
         issue_type=IssueType.FEATURE_REQUEST,

@@ -1,6 +1,6 @@
 from abc import ABC
 from collections.abc import Sequence
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from langchain_core.messages import BaseMessage
 
@@ -39,14 +39,20 @@ class LLMNode(TriageNode, ABC):
         self._structured_output_max_attempts = settings.guardrails.structured_output_max_attempts
 
     async def call_structured[T](
-        self, messages: Sequence[BaseMessage], schema: type[T]
+        self,
+        messages: Sequence[BaseMessage],
+        schema: type[T],
+        *,
+        method: Literal["function_calling", "json_schema"] = "function_calling",
     ) -> LLMResult[T]:
         """Thin delegate onto `llm.structured.call_structured` — see that
-        function's docstring for the fallback/cost-accounting behavior."""
+        function's docstring for the fallback/cost-accounting behavior, and
+        for what `method` controls."""
         return await call_structured(
             self._primary_model,
             self._fallback_model,
             messages,
             schema,
             max_attempts=self._structured_output_max_attempts,
+            method=method,
         )

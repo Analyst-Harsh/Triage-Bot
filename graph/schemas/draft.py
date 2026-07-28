@@ -1,8 +1,9 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from graph.schemas.actions import DraftAction, DraftIntent
+from graph.schemas.base import StrictBaseModel
 
 # `ProposedAction`/`DraftProposal` are the LLM-facing contract sent via
 # with_structured_output(..., method="function_calling") -- their docstrings
@@ -16,7 +17,7 @@ from graph.schemas.actions import DraftAction, DraftIntent
 # -- it can only signal intent via `CodeFixIntent`.
 
 
-class ProposedAction(BaseModel):
+class ProposedAction(StrictBaseModel):
     """One proposed action, plus why. For a code fix, propose CodeFixIntent
     -- you cannot supply a diff, target_files, or sandbox_result directly."""
 
@@ -30,7 +31,7 @@ class ProposedAction(BaseModel):
     )
 
 
-class DraftProposal(BaseModel):
+class DraftProposal(StrictBaseModel):
     """Propose one or more actions for this issue, each with its own
     rationale, plus one overall rationale tying them together."""
 
@@ -43,7 +44,7 @@ class DraftProposal(BaseModel):
     )
 
 
-class DraftedAction(BaseModel):
+class DraftedAction(StrictBaseModel):
     """A persisted proposed action plus its rationale. `action` is typed as
     the full `DraftAction` union (including `CodeFixAction`) rather than
     `DraftIntent`, so this shape doesn't need to change when the sandbox
@@ -54,7 +55,7 @@ class DraftedAction(BaseModel):
     rationale: str
 
 
-class DraftOutput(BaseModel):
+class DraftOutput(StrictBaseModel):
     """`unsupported_claims` comes from a second, independent LLM call (the
     grounding self-check, `DrafterSubgraph.grounding_check_node`) — never the
     same call that produced the draft, since a model grading its own
@@ -64,5 +65,5 @@ class DraftOutput(BaseModel):
 
     actions: list[DraftedAction] = Field(min_length=1)
     overall_rationale: str
-    unsupported_claims: list[str] = []
+    unsupported_claims: list[str] = Field(default_factory=list[str])
     drafted_at: datetime

@@ -130,6 +130,33 @@ async def test_execute_judges_comment_via_llm(triage_state: TriageState) -> None
     assert run_meta.estimated_cost_usd > triage_state["run_meta"].estimated_cost_usd
 
 
+async def test_execute_requests_json_schema_structured_output(
+    triage_state: TriageState,
+) -> None:
+    """`RiskJudgmentBatch` has no discriminated union, so the risk-judgment
+    call should opt into OpenAI's strict `json_schema` mode for a real
+    provider-side conformance guarantee rather than `function_calling`'s
+    best-effort bias."""
+    triage_state["draft"] = _draft([_comment_action()])
+    parsed_result = RiskJudgmentBatch(
+        judgments=[
+            ActionRiskJudgment(
+                action_index=0,
+                level=RiskLevel.LOW,
+                risk_factors=[],
+                reasoning="Test double judgment.",
+            )
+        ]
+    )
+    primary = make_fake_chat_model(model_name="gpt-4o-mini", parsed_result=parsed_result)
+    fallback = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
+    node = _FakeRiskCheckNode(primary_model=primary, fallback_model=fallback)
+
+    await node.execute(triage_state)
+
+    assert primary.received_structured_output_kwargs == [{"method": "json_schema"}]
+
+
 async def test_execute_threads_cache_tokens_into_run_meta(triage_state: TriageState) -> None:
     triage_state["draft"] = _draft([_comment_action()])
     parsed_result = RiskJudgmentBatch(

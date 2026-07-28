@@ -30,6 +30,7 @@ from graph.schemas import (
     PlannerOutput,
     ProposedAction,
     ResearchFindings,
+    ResearchToolName,
     SandboxAttempt,
     SandboxResult,
 )
@@ -63,7 +64,7 @@ def make_research_findings(**overrides: object) -> ResearchFindings:
         "summary": "Missing null check in the config loader.",
         "evidence": [
             Evidence(
-                source_type="docmind",
+                source_type=ResearchToolName.DOCMIND,
                 reference="src/config.py:12",
                 snippet="config = load_config()",
                 relevance=0.95,
@@ -264,6 +265,26 @@ async def test_finalize_populates_unsupported_claims_from_grounding_check() -> N
     draft = update.get("draft")
     assert draft is not None
     assert draft.unsupported_claims == ["Claims the fix shipped already."]
+
+
+async def test_finalize_requests_json_schema_for_grounding_check() -> None:
+    """`GroundingCritique` has no discriminated union (unlike `DraftProposal`,
+    the schema for the main draft call), so the grounding self-check should
+    opt into OpenAI's strict `json_schema` mode."""
+    primary = make_fake_chat_model(
+        model_name="gpt-4o-mini",
+        parsed_results_by_schema={
+            DraftProposal: make_proposal(),
+            GroundingCritique: GroundingCritique(),
+        },
+    )
+    fallback = make_fake_chat_model(model_name="claude-haiku-4-5-20251001")
+    node = _FakeDrafterSubgraph(primary, fallback)
+    state = make_state(make_planner_output(), make_research_findings())
+
+    await node.finalize(make_proposal(), [], state)
+
+    assert primary.received_structured_output_kwargs == [{"method": "json_schema"}]
 
 
 async def test_finalize_adds_grounding_cost_without_bumping_iteration_count() -> None:
@@ -642,6 +663,7 @@ async def test_finalize_grounding_check_excludes_fallback_comment_text(
         schema: type[object],  # noqa: ARG001
         *,
         max_attempts: int,  # noqa: ARG001
+        method: str = "function_calling",  # noqa: ARG001
     ) -> LLMResult[GroundingCritique]:
         captured_draft_texts.append(str(messages[-1].content))
         return LLMResult(

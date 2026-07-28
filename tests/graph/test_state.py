@@ -19,6 +19,7 @@ from graph.schemas import (
     PostOutcome,
     PostResults,
     ResearchFindings,
+    ResearchToolName,
     RiskAssessment,
     RiskLevel,
     RunStatus,
@@ -59,7 +60,7 @@ def make_fully_populated_state() -> TriageState:
         summary="Missing null check in the config loader.",
         evidence=[
             Evidence(
-                source_type="docmind",
+                source_type=ResearchToolName.DOCMIND,
                 reference="src/config.py:12",
                 snippet="config = load_config()",
                 relevance=0.95,

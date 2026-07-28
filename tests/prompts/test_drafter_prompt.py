@@ -11,6 +11,7 @@ from graph.schemas import (
     LabelAction,
     PlannerOutput,
     ResearchFindings,
+    ResearchToolName,
     SandboxAttempt,
     SandboxResult,
 )
@@ -74,7 +75,7 @@ def _make_findings(**overrides: object) -> ResearchFindings:
         "summary": "Missing null check in the config loader.",
         "evidence": [
             Evidence(
-                source_type="docmind",
+                source_type=ResearchToolName.DOCMIND,
                 reference="src/config.py:12",
                 snippet="config = load_config()",
                 relevance=0.95,
@@ -240,7 +241,7 @@ def test_build_drafting_message_notes_gaps() -> None:
 def test_format_evidence_for_prompt_includes_reference_and_snippet() -> None:
     evidence = [
         Evidence(
-            source_type="docmind",
+            source_type=ResearchToolName.DOCMIND,
             reference="src/config.py:12",
             snippet="config = load_config()",
             relevance=0.95,

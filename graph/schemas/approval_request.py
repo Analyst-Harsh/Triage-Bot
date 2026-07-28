@@ -2,14 +2,15 @@ from datetime import datetime
 from typing import Final
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from graph.schemas.base import StrictBaseModel
 from graph.schemas.enums import ActionType, RiskLevel
 
 DIFF_PREVIEW_MAX_BYTES: Final[int] = 20_000
 
 
-class QueuedActionSummary(BaseModel):
+class QueuedActionSummary(StrictBaseModel):
     """One queued (non-LOW-risk) drafted action, rendered for human review.
     `index` is `draft.actions[index]`'s position -- the slot an
     `ActionDecision` in the resume payload targets. Fields below
@@ -22,8 +23,8 @@ class QueuedActionSummary(BaseModel):
     rationale: str
     risk_level: RiskLevel
     risk_reasoning: str
-    risk_factors: list[str] = []
-    target_files: list[str] = []
+    risk_factors: list[str] = Field(default_factory=list[str])
+    target_files: list[str] = Field(default_factory=list[str])
     sandbox_passed: bool | None = None
     sandbox_test_command: str | None = None
     diff_preview: str | None = Field(
@@ -36,7 +37,7 @@ class QueuedActionSummary(BaseModel):
     diff_truncated: bool = False
 
 
-class ApprovalRequest(BaseModel):
+class ApprovalRequest(StrictBaseModel):
     """The `interrupt()` payload `ApprovalQueueNode` surfaces -- one entry
     per queued action, requiring a matching `ActionDecision` on resume.
     Built by `ApprovalRequestBuilder`

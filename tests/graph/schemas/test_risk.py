@@ -1,6 +1,9 @@
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 from graph.schemas import (
     ActionRiskAssessment,
     ActionRiskJudgment,
@@ -102,3 +105,15 @@ def test_risk_judgment_batch_json_round_trip() -> None:
     batch = make_risk_judgment_batch()
     restored = RiskJudgmentBatch.model_validate_json(batch.model_dump_json())
     assert restored == batch
+
+
+def test_action_risk_judgment_rejects_unexpected_field() -> None:
+    """`ActionRiskJudgment` inherits `StrictBaseModel`'s `extra="forbid"` --
+    an unexpected field must be rejected outright, not silently dropped."""
+    with pytest.raises(ValidationError):
+        make_action_risk_judgment(unexpected_field="surprise")
+
+
+def test_risk_judgment_batch_rejects_unexpected_field() -> None:
+    with pytest.raises(ValidationError):
+        make_risk_judgment_batch(unexpected_field="surprise")

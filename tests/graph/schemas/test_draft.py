@@ -83,6 +83,18 @@ def test_draft_proposal_rejects_empty_actions() -> None:
         DraftProposal(actions=[], overall_rationale="No actions proposed.")
 
 
+def test_proposed_action_rejects_unexpected_field() -> None:
+    """`ProposedAction` inherits `StrictBaseModel`'s `extra="forbid"` -- an
+    unexpected field must be rejected outright, not silently dropped."""
+    with pytest.raises(ValidationError):
+        make_proposed_action(unexpected_field="surprise")
+
+
+def test_draft_proposal_rejects_unexpected_field() -> None:
+    with pytest.raises(ValidationError):
+        make_draft_proposal(unexpected_field="surprise")
+
+
 def test_draft_proposal_can_hold_multiple_actions() -> None:
     proposal = make_draft_proposal(
         actions=[

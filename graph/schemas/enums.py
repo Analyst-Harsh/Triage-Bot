@@ -48,3 +48,9 @@ class PostOutcome(StrEnum):
     FAILED = "failed"
     QUEUED = "queued"
     REJECTED = "rejected"
+
+
+class ResearchToolName(StrEnum):
+    DOCMIND = "docmind"
+    GITHUB = "github"
+    WEB = "web"
