@@ -52,7 +52,9 @@ Every judge prompt (`evals/judges/prompts/`) includes the same "untrusted data, 
 
 ## Golden dataset (`evals/golden/cases.py`)
 
-Two cases currently, both from `Analyst-Harsh/triage-bot-test` (the only issues with clean, fully-resolvable traces found during authoring — see the "not every issue" section above for why `arrow-py/arrow#1278` isn't one of them, and why `#1` from the same test repo was also excluded: its trace has orphaned root spans from what looks like an earlier tracing setup, not a clean case to build a golden expectation on). More cases to be added as more issues get run with tracing configured.
+Five cases currently, all from `Analyst-Harsh/triage-bot-test` (the only issues with clean, fully-resolvable traces found during authoring — see the "not every issue" section above for why `arrow-py/arrow#1278` isn't one of them, and why `#1` from the same test repo was also excluded: its trace has orphaned root spans from what looks like an earlier tracing setup, not a clean case to build a golden expectation on). More cases to be added as more issues get run with tracing configured.
+
+`#9` is the first genuine spam/abuse case (filling the gap noted below under "Explicit not-now follow-ups" for prompt-injection, though this one is content-based spam, not injection) — it exercises `SpamCloseNode`'s current behavior: unlike the old `SpamRejectedNode`, a spam classification now produces a one-action `close` draft and routes to `approval_queue` for human sign-off, rather than short-circuiting with no draft at all. That required two fixes: `evals/graders/e2e_grader.py::_check_spam_short_circuit` now checks `research_findings is None` (Researcher never ran) instead of `draft is None`, and `evals/cli.py::_run_selected` skips the `researcher`/`drafter` eval types entirely for a case with `expected_spam_short_circuit=True`, since there's no trajectory to reconstruct when those nodes never ran.
 
 ## Running it
 
