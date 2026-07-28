@@ -38,20 +38,26 @@ def _check_expected_issue_type(expected: IssueType, run: ReconstructedRun) -> Gr
 
 
 def _check_spam_short_circuit(run: ReconstructedRun) -> GraderCheck:
+    """`SpamCloseNode` (replacing the old `SpamRejectedNode`) builds a
+    hardcoded-HIGH-risk `close` action and routes straight to
+    `approval_queue`, so a spam run always carries a draft now -- `draft is
+    None` is no longer the short-circuit signal. `research_findings is
+    None` is: Researcher/Drafter never ran, since `route_after_planner`
+    sends `SPAM_OR_ABUSE` straight to `spam_close`."""
     is_spam_classification = (
         run.planner_output is not None and run.planner_output.issue_type == IssueType.SPAM_OR_ABUSE
     )
-    short_circuited = is_spam_classification and run.draft is None
+    short_circuited = is_spam_classification and run.research_findings is None
     return GraderCheck(
         name="spam_short_circuit",
         passed=short_circuited,
         detail=(
-            "planner classified spam_or_abuse and no draft was produced"
+            "planner classified spam_or_abuse and Researcher never ran"
             if short_circuited
             else (
                 f"expected a spam short-circuit, got issue_type="
                 f"{run.planner_output.issue_type.value if run.planner_output else None}, "
-                f"draft_present={run.draft is not None}"
+                f"researcher_ran={run.research_findings is not None}"
             )
         ),
     )

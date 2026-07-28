@@ -125,18 +125,23 @@ async def _run_selected(
 ) -> list[EvalCaseResult]:
     """One shared `TraceCache` across every case/eval-type combination in
     this call, so a case used by more than one eval type triggers exactly
-    one Langfuse fetch (a cache hit on the second+ use)."""
+    one Langfuse fetch (a cache hit on the second+ use).
+
+    `researcher`/`drafter` are skipped entirely for a case with
+    `expected_spam_short_circuit=True` -- those nodes never ran for it (see
+    `SpamCloseNode`), so there is no trajectory to reconstruct or grade;
+    attempting it raises instead of producing a meaningful failure."""
     results: list[EvalCaseResult] = []
     for case in cases:
         if eval_type in ("e2e", "all"):
             results.append(
                 await _run_e2e_case(case, cache, settings=settings, with_judge=with_judge)
             )
-        if eval_type in ("researcher", "all"):
+        if eval_type in ("researcher", "all") and not case.expected_spam_short_circuit:
             results.append(
                 await _run_researcher_case(case, cache, settings=settings, with_judge=with_judge)
             )
-        if eval_type in ("drafter", "all"):
+        if eval_type in ("drafter", "all") and not case.expected_spam_short_circuit:
             results.append(
                 await _run_drafter_case(case, cache, settings=settings, with_judge=with_judge)
             )
