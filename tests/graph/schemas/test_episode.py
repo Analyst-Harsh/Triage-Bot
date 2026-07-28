@@ -55,8 +55,12 @@ def test_json_round_trip() -> None:
 
 
 def test_construction_with_post_results_none() -> None:
-    """A spam-rejected run (`SpamRejectedNode`) never reaches drafting/
-    risk-check/posting, so it writes an episode with `post_results=None`."""
+    """`post_results=None` is a backward-compatibility case: an episode
+    written before this field existed must still construct and deserialize
+    (see `test_deserializes_without_post_results_for_backward_compatibility`
+    below). No current code path writes one -- `SpamCloseNode` (formerly
+    `SpamRejectedNode`) always routes to `ApprovalQueueNode` now, which
+    writes a complete episode with real `post_results`."""
     episode = make_episode(
         actions_taken=[],
         risk_levels=[],

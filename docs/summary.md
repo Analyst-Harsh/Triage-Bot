@@ -10,9 +10,9 @@ Both paths feed into the same graph — the agent doesn't know or care whether a
 The five-step pipeline (the part that does the thinking)
 This is a zoomed-in version of "Agent investigates" and "Agent decides risk" from the simple picture:
 
-Planner — reads the raw issue and figures out: what kind of issue is this, and what needs investigating? Spam or abusive issues are short-circuited right here — rejected outright rather than continuing through the rest of the pipeline.
+Planner — reads the raw issue and figures out: what kind of issue is this, and what needs investigating? Spam or abusive issues are short-circuited right here — a close action is proposed directly, skipping straight to human approval rather than continuing through Researcher/Drafter/Risk check.
 Researcher — actually goes and checks: searches your codebase, pulls from indexed docs (via DocMind, your first project), searches the web if needed.
-Drafter — writes the actual response. For issues that look like simple, well-scoped bugs, it goes a step further: reproduces the bug in an isolated sandbox and tests a real code fix.
+Drafter — writes the actual response. For issues that look like simple, well-scoped bugs — or feature requests for new functionality — it goes a step further: reproduces the bug (or the desired new behavior) in an isolated sandbox and tests a real code fix.
 Risk check — decides how much trust this action deserves.
 Auto-post or Approval queue — low-risk actions (like a label or a clarifying comment) go out immediately. Anything riskier — especially a proposed code fix — pauses the run (via LangGraph's `interrupt()`, checkpointed so it survives a restart) and waits for you to approve or reject each one individually. A code fix you approve becomes a real pull request, built from the drafter's sandboxed diff against the exact commit it was verified against.
 

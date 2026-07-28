@@ -273,14 +273,28 @@ async def test_invoke_pauses_at_approval_queue_and_resumes_after_approval(
     assert post_results.action_results[0].outcome == PostOutcome.POSTED
 
 
-async def test_invoke_short_circuits_to_spam_rejected_without_reaching_researcher(
+def _fake_spam_planner_node(memory_store: BaseEpisodicMemoryStore) -> PlannerNode:
+    return make_fake_planner_node(
+        memory_store,
+        parsed_result=PlannerClassification(
+            issue_type=IssueType.SPAM_OR_ABUSE,
+            classification_confidence=0.98,
+            investigation_plan=[],
+            reasoning="Promotional spam unrelated to the repository.",
+        ),
+    )
+
+
+async def test_invoke_short_circuits_spam_straight_to_approval_queue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """End-to-end: a `SPAM_OR_ABUSE`-classified issue routes straight from
-    `planner` to `spam_rejected` and ends there -- `researcher`/`drafter`/
-    `risk_check`/`auto_post` never run, proven by the state assertions below
-    (`research_findings`/`draft`/`risk_assessment`/`post_results` all stay
-    `None`). Every downstream node is still faked, exactly like
+    `planner` to `spam_close`, which skips `researcher`/`drafter`/
+    `risk_check`/`auto_post` entirely (proven by `research_findings` staying
+    `None` below) and pauses at `approval_queue` instead of posting or
+    ending the run -- a spam-triggered close always requires human
+    approval, never an automatic post (see `SpamCloseNode`). Every
+    downstream node is still faked, exactly like
     `test_invoke_flows_through_all_nodes_to_auto_post` -- `build_graph()`
     *constructs* every node regardless of which ones the routing actually
     reaches, and real construction (`ResearcherSubgraph`/`DrafterSubgraph`/
@@ -288,38 +302,96 @@ async def test_invoke_short_circuits_to_spam_rejected_without_reaching_researche
     `AutoPostNode`/`ApprovalQueueNode`'s real `__init__` resolving the
     process-wide `GitHubClient`) needs credentials this hermetic test must
     not depend on, even though none of these nodes ever actually run this
-    turn."""
-
-    def _fake_spam_planner_node(memory_store: BaseEpisodicMemoryStore) -> PlannerNode:
-        return make_fake_planner_node(
-            memory_store,
-            parsed_result=PlannerClassification(
-                issue_type=IssueType.SPAM_OR_ABUSE,
-                classification_confidence=0.98,
-                investigation_plan=[],
-                reasoning="Promotional spam unrelated to the repository.",
-            ),
-        )
-
+    turn. `SpamCloseNode` itself is never faked -- its real `__init__` takes
+    no arguments and does no I/O, so it's cheap and safe to construct for
+    real here."""
     monkeypatch.setattr(builder_module, "PlannerNode", _fake_spam_planner_node)
     monkeypatch.setattr(builder_module, "ResearcherSubgraph", make_fake_researcher_subgraph)
     monkeypatch.setattr(builder_module, "DrafterSubgraph", make_fake_drafter_subgraph)
     monkeypatch.setattr(builder_module, "RiskCheckNode", make_fake_risk_check_node)
     monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
     monkeypatch.setattr(builder_module, "ApprovalQueueNode", make_fake_approval_queue_node)
-    graph = build_graph()
+    checkpointer = InMemorySaver()
+    graph = build_graph(checkpointer=checkpointer)
     issue = make_issue()
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
+    config: RunnableConfig = {"configurable": {"thread_id": state["run_meta"].thread_id}}
 
-    result = await graph.ainvoke(state)  # pyright: ignore[reportUnknownMemberType]
+    paused = await graph.ainvoke(state, config)  # pyright: ignore[reportUnknownMemberType]
 
-    assert result["status"] == RunStatus.REJECTED
-    assert result["planner_output"] is not None
-    assert result["planner_output"].issue_type == IssueType.SPAM_OR_ABUSE
-    assert result["research_findings"] is None
-    assert result["draft"] is None
-    assert result["risk_assessment"] is None
-    assert result["post_results"] is None
+    assert paused["status"] == RunStatus.PENDING_APPROVAL
+    assert "__interrupt__" in paused
+    assert paused["planner_output"] is not None
+    assert paused["planner_output"].issue_type == IssueType.SPAM_OR_ABUSE
+    assert paused["research_findings"] is None
+    draft = paused["draft"]
+    assert draft is not None
+    assert len(draft.actions) == 1
+    risk_assessment = paused["risk_assessment"]
+    assert risk_assessment is not None
+    assert risk_assessment.action_assessments[0].level == RiskLevel.HIGH
+    snapshot = await graph.aget_state(config)  # pyright: ignore[reportUnknownMemberType]
+    assert snapshot.next == (NodeName.APPROVAL_QUEUE,)
+
+
+async def test_invoke_resumes_spam_close_after_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Approving the queued spam-close action posts it for real (via the
+    fake `ActionExecutor`) and finishes the run as `APPROVED_AND_POSTED` --
+    the same terminal state a human-approved close of any other kind
+    reaches."""
+    monkeypatch.setattr(builder_module, "PlannerNode", _fake_spam_planner_node)
+    monkeypatch.setattr(builder_module, "ResearcherSubgraph", make_fake_researcher_subgraph)
+    monkeypatch.setattr(builder_module, "DrafterSubgraph", make_fake_drafter_subgraph)
+    monkeypatch.setattr(builder_module, "RiskCheckNode", make_fake_risk_check_node)
+    monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
+    monkeypatch.setattr(builder_module, "ApprovalQueueNode", make_fake_approval_queue_node)
+    checkpointer = InMemorySaver()
+    graph = build_graph(checkpointer=checkpointer)
+    issue = make_issue()
+    state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
+    config: RunnableConfig = {"configurable": {"thread_id": state["run_meta"].thread_id}}
+    await graph.ainvoke(state, config)  # pyright: ignore[reportUnknownMemberType]
+
+    resumed = await graph.ainvoke(  # pyright: ignore[reportUnknownMemberType]
+        Command(resume={"decisions": [{"index": 0, "approved": True}]}), config
+    )
+
+    assert resumed["status"] == RunStatus.APPROVED_AND_POSTED
+    post_results = resumed["post_results"]
+    assert post_results is not None
+    assert post_results.action_results[0].outcome == PostOutcome.POSTED
+
+
+async def test_invoke_resumes_spam_close_after_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rejecting the queued spam-close action (a human overriding the
+    Planner's spam call) leaves the issue untouched and finishes the run as
+    `REJECTED` -- no GitHub call happens."""
+    monkeypatch.setattr(builder_module, "PlannerNode", _fake_spam_planner_node)
+    monkeypatch.setattr(builder_module, "ResearcherSubgraph", make_fake_researcher_subgraph)
+    monkeypatch.setattr(builder_module, "DrafterSubgraph", make_fake_drafter_subgraph)
+    monkeypatch.setattr(builder_module, "RiskCheckNode", make_fake_risk_check_node)
+    monkeypatch.setattr(builder_module, "AutoPostNode", make_fake_auto_post_node)
+    monkeypatch.setattr(builder_module, "ApprovalQueueNode", make_fake_approval_queue_node)
+    checkpointer = InMemorySaver()
+    graph = build_graph(checkpointer=checkpointer)
+    issue = make_issue()
+    state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
+    config: RunnableConfig = {"configurable": {"thread_id": state["run_meta"].thread_id}}
+    await graph.ainvoke(state, config)  # pyright: ignore[reportUnknownMemberType]
+
+    resumed = await graph.ainvoke(  # pyright: ignore[reportUnknownMemberType]
+        Command(resume={"decisions": [{"index": 0, "approved": False, "note": "Not spam."}]}),
+        config,
+    )
+
+    assert resumed["status"] == RunStatus.REJECTED
+    post_results = resumed["post_results"]
+    assert post_results is not None
+    assert post_results.action_results[0].outcome == PostOutcome.REJECTED
 
 
 def test_build_graph_threads_checkpointer_through_compile(

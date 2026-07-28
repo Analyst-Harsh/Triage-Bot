@@ -7,10 +7,12 @@ from graph.state import TriageState
 
 def route_after_planner(state: TriageState) -> NodeName | str:
     """Conditional edge out of `planner`: sends `SPAM_OR_ABUSE`-classified
-    issues straight to `spam_rejected` instead of continuing into
-    Researcher/Drafter/RiskCheck/AutoPost -- a graceful terminal outcome
-    (`RunStatus.REJECTED`), not an exception (see `SpamRejectedNode`). Every
-    other `IssueType` still gets a full pipeline pass; this is a content-based
+    issues straight to `spam_close` instead of continuing into
+    Researcher/Drafter/RiskCheck/AutoPost -- `SpamCloseNode` builds a
+    hardcoded-HIGH-risk close action and routes directly to
+    `ApprovalQueueNode`, so the run always pauses for human approval rather
+    than posting automatically (see `SpamCloseNode`). Every other
+    `IssueType` still gets a full pipeline pass; this is a content-based
     routing decision resting entirely on the Planner's own classification,
     with no independent structural backup the way the injection-pattern
     scanner backs up risk routing (see `docs/agent/security.md`)."""
@@ -18,7 +20,7 @@ def route_after_planner(state: TriageState) -> NodeName | str:
     if planner_output is None:
         raise ValueError("route_after_planner called before planner_output was set")
     if planner_output.issue_type == IssueType.SPAM_OR_ABUSE:
-        return NodeName.SPAM_REJECTED
+        return NodeName.SPAM_CLOSE
     return NodeName.RESEARCHER
 
 

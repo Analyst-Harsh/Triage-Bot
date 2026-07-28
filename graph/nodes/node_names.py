@@ -9,7 +9,7 @@ class NodeName(StrEnum):
     at each call site."""
 
     PLANNER = "planner"
-    SPAM_REJECTED = "spam_rejected"
+    SPAM_CLOSE = "spam_close"
     RESEARCHER = "researcher"
     DRAFTER = "drafter"
     RISK_CHECK = "risk_check"
