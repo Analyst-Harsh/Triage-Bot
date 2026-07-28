@@ -48,11 +48,11 @@ def _planner_output(**overrides: object) -> PlannerOutput:
     return PlannerOutput(**defaults)  # type: ignore[arg-type]
 
 
-def test_route_after_planner_routes_spam_to_spam_rejected() -> None:
+def test_route_after_planner_routes_spam_to_spam_close() -> None:
     state = create_initial_state(make_issue(), max_iterations=10, max_cost_usd=1.0)
     state["planner_output"] = _planner_output(issue_type=IssueType.SPAM_OR_ABUSE)
 
-    assert route_after_planner(state) == NodeName.SPAM_REJECTED
+    assert route_after_planner(state) == NodeName.SPAM_CLOSE
 
 
 @pytest.mark.parametrize(

@@ -13,7 +13,7 @@ from graph.nodes import (
     PlannerNode,
     ResearcherSubgraph,
     RiskCheckNode,
-    SpamRejectedNode,
+    SpamCloseNode,
     route_after_auto_post,
     route_after_planner,
 )
@@ -70,13 +70,16 @@ def build_graph(
 ) -> CompiledStateGraph[TriageState]:
     """Wires the Planner -> Researcher -> Drafter -> Risk check -> Auto-post
     pipeline. From `planner`, `route_after_planner` conditionally routes a
-    `SPAM_OR_ABUSE`-classified issue straight to `spam_rejected` (a graceful
-    terminal outcome, `status=REJECTED`) instead of continuing into
-    Researcher/Drafter/RiskCheck/AutoPost; every other `IssueType` continues
-    to `researcher` as before. From `auto_post`, `route_after_auto_post`
-    conditionally routes to `approval_queue` only when at least one drafted
-    action was left queued (non-LOW risk); an all-LOW-risk run ends right
-    after `auto_post` instead.
+    `SPAM_OR_ABUSE`-classified issue straight to `spam_close` instead of
+    continuing into Researcher/Drafter/RiskCheck/AutoPost; `spam_close`
+    builds a hardcoded-HIGH-risk close action by policy and routes directly
+    to `approval_queue` (skipping `risk_check`/`auto_post` entirely, since
+    there's nothing left to judge -- see `SpamCloseNode`), so the run always
+    pauses for human approval rather than posting automatically. Every
+    other `IssueType` continues to `researcher` as before. From `auto_post`,
+    `route_after_auto_post` conditionally routes to `approval_queue` only
+    when at least one drafted action was left queued (non-LOW risk); an
+    all-LOW-risk run ends right after `auto_post` instead.
 
     Stays synchronous and does no I/O: `researcher_tools`/`drafter_tools`
     (MCP/Tavily tools, inherently async to load) are injected by the
@@ -99,11 +102,11 @@ def build_graph(
     manager -- the underlying `AsyncPostgresStore` connection pool needs real
     open/close lifecycle, unlike `GitHubClient`'s singleton) and defaults to
     a `NullEpisodicMemoryStore()` no-op when omitted. It's threaded into
-    `PlannerNode` (reads similar past episodes), `AutoPostNode`,
-    `ApprovalQueueNode`, and `SpamRejectedNode` (each writes a completed
-    run's outcome back, `SpamRejectedNode` with `draft_actions=[]`/
-    `risk_assessment=None`/`post_results=None` since a spam-rejected run
-    never reaches drafting).
+    `PlannerNode` (reads similar past episodes), `AutoPostNode`, and
+    `ApprovalQueueNode` (each writes a completed run's outcome back).
+    `SpamCloseNode` takes no `memory_store` -- it never terminates a run
+    itself, so `ApprovalQueueNode` is always the one that writes the
+    episode once the human decision resolves.
 
     Every simple node here is a `TriageNode` (see `graph/nodes/base.py`).
     The Researcher and the Drafter are `AgentSubgraph`s instead — their own
@@ -120,7 +123,7 @@ def build_graph(
     # Nodes
     memory_store = memory_store or NullEpisodicMemoryStore()
     planner = PlannerNode(memory_store)
-    spam_rejected = SpamRejectedNode(memory_store)
+    spam_close = SpamCloseNode()
     researcher = ResearcherSubgraph(researcher_tools or [])
     drafter = DrafterSubgraph(drafter_tools or [], sandbox_handle=drafter_sandbox_handle)
     risk_check = RiskCheckNode()
@@ -133,14 +136,16 @@ def build_graph(
     workflow.add_node(planner.name, planner)  # pyright: ignore[reportUnknownMemberType]
     workflow.add_node(researcher.name, researcher.compile())  # pyright: ignore[reportUnknownMemberType]
     workflow.add_node(drafter.name, drafter.compile())  # pyright: ignore[reportUnknownMemberType]
-    for node in (spam_rejected, risk_check, auto_post, approval_queue):
+    for node in (spam_close, risk_check, auto_post, approval_queue):
         workflow.add_node(node.name, node)  # pyright: ignore[reportUnknownMemberType]
 
     workflow.add_edge(START, planner.name)
 
-    # Short circuit SPAM_OR_ABUSE issues straight to spam_rejected
+    # Short circuit SPAM_OR_ABUSE issues straight to spam_close, which
+    # routes directly to approval_queue -- always human-reviewed, never
+    # auto-posted (see SpamCloseNode).
     workflow.add_conditional_edges(planner.name, route_after_planner)  # pyright: ignore[reportUnknownMemberType]
-    workflow.add_edge(spam_rejected.name, END)
+    workflow.add_edge(spam_close.name, approval_queue.name)
 
     workflow.add_edge(researcher.name, drafter.name)
     workflow.add_edge(drafter.name, risk_check.name)

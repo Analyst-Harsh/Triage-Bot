@@ -8,7 +8,7 @@ from graph.nodes.planner import PlannerNode
 from graph.nodes.researcher import ResearcherSubgraph
 from graph.nodes.risk_check import RiskCheckNode
 from graph.nodes.routing import route_after_auto_post, route_after_planner
-from graph.nodes.spam_rejected import SpamRejectedNode
+from graph.nodes.spam_close import SpamCloseNode
 from graph.nodes.utils.action_executor import ActionExecutor
 
 __all__ = [
@@ -21,7 +21,7 @@ __all__ = [
     "PlannerNode",
     "ResearcherSubgraph",
     "RiskCheckNode",
-    "SpamRejectedNode",
+    "SpamCloseNode",
     "TriageNode",
     "route_after_auto_post",
     "route_after_planner",

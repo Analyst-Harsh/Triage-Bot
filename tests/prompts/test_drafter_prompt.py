@@ -104,6 +104,29 @@ def test_build_drafter_system_prompt_notes_no_tools_available() -> None:
     assert "none available" in prompt
 
 
+def test_build_drafter_system_prompt_invites_a_pr_for_feature_requests() -> None:
+    """Feature requests must not be framed as comment-only: the intro and
+    Tone section should explicitly invite a verified code change (opened as
+    a PR after approval), the same as a bug fix, whenever it's feasible."""
+    prompt = build_drafter_system_prompt(["run_tests", "install_dependencies", "read_file"])
+
+    assert "feature requests" in prompt
+    assert "pull request" in prompt
+    assert "Feature request ->" in prompt
+    assert "not a comment-only" in prompt
+
+
+def test_build_drafter_system_prompt_generalizes_repro_step_for_feature_requests() -> None:
+    """The sandbox workflow's step 5 (write a failing test before editing)
+    must read naturally for a feature request too, not just a bug -- there's
+    no pre-existing bug to reproduce, so the guidance names the desired
+    behavior explicitly rather than assuming a defect."""
+    prompt = build_drafter_system_prompt(["run_tests", "install_dependencies", "read_file"])
+
+    assert "For a feature request" in prompt
+    assert "the feature doesn't exist yet" in prompt
+
+
 def test_build_drafter_system_prompt_includes_code_fix_workflow_when_sandbox_available() -> None:
     """When run_tests is in the available toolset, the sandbox workflow
     guidance replaces the blanket "never propose a code fix" line."""

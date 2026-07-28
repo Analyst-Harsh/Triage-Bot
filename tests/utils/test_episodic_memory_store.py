@@ -258,9 +258,13 @@ async def test_save_episode_calls_aput_with_namespace_key_value_index() -> None:
 
 
 async def test_save_episode_with_none_risk_assessment_and_post_results() -> None:
-    """The spam-rejection path (`SpamRejectedNode`) never reaches drafting/
-    risk-check/posting -- `risk_assessment`/`post_results` are `None`, and
-    `risk_levels` degrades to `[]` rather than raising."""
+    """`risk_assessment`/`post_results` being `None` is now purely a
+    backward-compatibility case (an episode written before `post_results`
+    existed must still round-trip) -- no current code path produces this
+    shape (`SpamCloseNode`, unlike the old `SpamRejectedNode` it replaces,
+    always routes to `ApprovalQueueNode`, which writes real `risk_assessment`/
+    `post_results`). The store must still accept and degrade `risk_levels`
+    to `[]` rather than raising when it does happen."""
     store, fake = make_store()
     run_id = uuid4()
 

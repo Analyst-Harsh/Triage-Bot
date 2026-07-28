@@ -471,6 +471,33 @@ async def test_finalize_resolves_code_fix_intent_into_draft_action() -> None:
     assert isinstance(draft.actions[0].action, CodeFixAction)
 
 
+async def test_finalize_resolves_code_fix_intent_for_feature_request_same_as_bug() -> None:
+    """`_resolve_code_fix_intent` reads only `self._sandbox_handle`'s
+    recorded attempts -- it never branches on `planner_output.issue_type` --
+    so a `FEATURE_REQUEST`-classified issue with a passing fix_attempt
+    resolves to a real `CodeFixAction` exactly like a `BUG`-classified one
+    does (see `test_finalize_resolves_code_fix_intent_into_draft_action`).
+    This locks in that the sandboxed-PR path is genuinely issue-type-
+    agnostic, not just true by omission."""
+    attempt = make_sandbox_attempt()
+    handle = make_sandbox_handle()
+    handle.attempts = [attempt]
+    handle.base_commit_sha = "abc123def456"
+    handle.base_ref = "main"
+    node = make_drafter(sandbox_handle=handle)
+    proposal = make_proposal(actions=[make_code_fix_intent_item()])
+    state = make_state(
+        make_planner_output(issue_type=IssueType.FEATURE_REQUEST), make_research_findings()
+    )
+
+    update = await node.finalize(proposal, [], state)
+
+    draft = update.get("draft")
+    assert draft is not None
+    assert len(draft.actions) == 1
+    assert isinstance(draft.actions[0].action, CodeFixAction)
+
+
 async def test_finalize_drops_duplicate_code_fix_intent_with_warning() -> None:
     """A proposal with two `CodeFixIntent`s must resolve exactly one of them
     against the sandbox handle -- resolving both would duplicate (or
