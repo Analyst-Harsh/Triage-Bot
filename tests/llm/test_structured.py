@@ -111,6 +111,31 @@ async def test_call_structured_honors_explicit_max_attempts() -> None:
     assert len(primary.received_messages) == 1
 
 
+async def test_call_structured_defaults_to_function_calling_method() -> None:
+    """`method` defaults to `"function_calling"` -- the one mode that works
+    uniformly across every schema shape this function handles, including a
+    discriminated union (see the docstring for why)."""
+    primary = make_fake_chat_model(model_name="primary-model", parsed_result=_Answer(value="ok"))
+    fallback = make_fake_chat_model(model_name="fallback-model")
+
+    await call_structured(primary, fallback, [], _Answer, max_attempts=2)
+
+    assert primary.received_structured_output_kwargs == [{"method": "function_calling"}]
+
+
+async def test_call_structured_forwards_explicit_json_schema_method() -> None:
+    """A caller whose schema has no discriminated union (e.g.
+    `PlannerClassification`, `RiskJudgmentBatch`) can opt into OpenAI's
+    strict `json_schema` mode -- this proves the `method` argument actually
+    reaches `with_structured_output`, not just documented intent."""
+    primary = make_fake_chat_model(model_name="primary-model", parsed_result=_Answer(value="ok"))
+    fallback = make_fake_chat_model(model_name="fallback-model")
+
+    await call_structured(primary, fallback, [], _Answer, max_attempts=2, method="json_schema")
+
+    assert primary.received_structured_output_kwargs == [{"method": "json_schema"}]
+
+
 async def test_call_structured_repairs_after_a_validation_error() -> None:
     """A genuine pydantic.ValidationError (not just any exception) should get
     the validation error fed back to the model as a corrective follow-up

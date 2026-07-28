@@ -1,11 +1,12 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from graph.schemas.base import StrictBaseModel
 from graph.schemas.enums import PostOutcome
 
 
-class ActionPostResult(BaseModel):
+class ActionPostResult(StrictBaseModel):
     """Persisted post-attempt outcome for one drafted action. Positional,
     not indexed: item i here always corresponds to `draft.actions[i]`,
     mirroring `ActionRiskAssessment`."""
@@ -23,7 +24,7 @@ class ActionPostResult(BaseModel):
     )
 
 
-class PostResults(BaseModel):
+class PostResults(StrictBaseModel):
     """Persisted container -- the type of `TriageState.post_results`.
     `action_results` must be the same length as `draft.actions`, in the
     same order."""

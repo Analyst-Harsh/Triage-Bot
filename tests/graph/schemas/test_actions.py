@@ -105,6 +105,38 @@ def test_draft_intent_dispatches_code_fix_intent() -> None:
     assert isinstance(restored, CodeFixIntent)
 
 
+def test_comment_action_rejects_unexpected_field() -> None:
+    """`CommentAction` inherits `StrictBaseModel`'s `extra="forbid"` -- an
+    unexpected field must be rejected outright, not silently dropped, same
+    invariant `CodeFixIntent` already relied on before this base class
+    existed."""
+    payload = {"action_type": "comment", "comment_body": "Thanks!", "unexpected_field": "surprise"}
+    with pytest.raises(ValidationError):
+        draft_action_adapter.validate_python(payload)
+
+
+def test_label_action_rejects_unexpected_field() -> None:
+    payload = {
+        "action_type": "label",
+        "labels_to_add": ["bug"],
+        "labels_to_remove": [],
+        "unexpected_field": "surprise",
+    }
+    with pytest.raises(ValidationError):
+        draft_action_adapter.validate_python(payload)
+
+
+def test_close_action_rejects_unexpected_field() -> None:
+    payload = {
+        "action_type": "close",
+        "reason": "duplicate",
+        "close_comment": None,
+        "unexpected_field": "surprise",
+    }
+    with pytest.raises(ValidationError):
+        draft_action_adapter.validate_python(payload)
+
+
 def test_draft_intent_rejects_full_code_fix_action_payload() -> None:
     """The core security invariant: the LLM-facing `DraftIntent` union's
     `code_fix` variant is `CodeFixIntent` (intent only), not `CodeFixAction`.

@@ -1,4 +1,4 @@
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import pytest
 import structlog
@@ -356,6 +356,48 @@ async def test_summarize_node_parses_structured_output(triage_state: TriageState
     assert update.get("summary") == _StubSummary(note="found it")
     assert (update.get("summarize_cost") or 0.0) >= 0.0
     assert update.get("messages") is None
+
+
+async def test_summarize_node_defaults_to_function_calling_method(
+    triage_state: TriageState,
+) -> None:
+    """`summary_schema_method` defaults to `"function_calling"` on the base
+    class -- the safe choice for any subclass whose `summary_schema` might
+    contain a discriminated union (e.g. `DrafterSubgraph`'s `DraftProposal`).
+    A subclass with no such union (e.g. `ResearcherSubgraph`) overrides it."""
+    node = make_node()
+    state = make_loop_state(triage_state, messages=[])
+
+    await node.summarize_node(state)
+
+    assert node._primary_model.received_structured_output_kwargs == [  # pyright: ignore[reportPrivateUsage]
+        {"method": "function_calling"}
+    ]
+
+
+class _StubAgentSubgraphJsonSchema(_StubAgentSubgraph):
+    """Same as `_StubAgentSubgraph`, but overriding `summary_schema_method`
+    -- the same override shape `ResearcherSubgraph` uses in production."""
+
+    summary_schema_method: ClassVar[Literal["function_calling", "json_schema"]] = "json_schema"
+
+
+async def test_summarize_node_forwards_overridden_schema_method(
+    triage_state: TriageState,
+) -> None:
+    """A subclass overriding `summary_schema_method` (e.g. `ResearcherSubgraph`
+    setting it to `"json_schema"`) must have that value actually reach
+    `with_structured_output`, not just `function_calling`'s default."""
+    primary = make_fake_chat_model(
+        model_name="claude-haiku-4-5-20251001", parsed_result=_StubSummary(note="found it")
+    )
+    fallback = make_fake_chat_model(model_name="gpt-4o-mini")
+    node = _StubAgentSubgraphJsonSchema(primary, fallback)
+    state = make_loop_state(triage_state, messages=[])
+
+    await node.summarize_node(state)
+
+    assert primary.received_structured_output_kwargs == [{"method": "json_schema"}]
 
 
 async def test_summarize_node_tolerates_unresolved_tool_call(triage_state: TriageState) -> None:

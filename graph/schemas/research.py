@@ -1,12 +1,13 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import Field, JsonValue
 
-ResearchToolName = Literal["docmind", "github", "web"]
+from graph.schemas.base import StrictBaseModel
+from graph.schemas.enums import ResearchToolName
 
 
-class Evidence(BaseModel):
+class Evidence(StrictBaseModel):
     """One citation backing a research finding. `sha` is populated whenever
     the source naturally carries a git blob/commit SHA (GitHub commits/PRs,
     DocMind's codebase index) — that's the "SHA-stamped" traceability
@@ -14,16 +15,20 @@ class Evidence(BaseModel):
     file changes later. `None` for web results, or when a tool result
     doesn't expose one."""
 
-    source_type: ResearchToolName
+    source_type: ResearchToolName = Field(
+        description="Which category of source this citation came from."
+    )
     reference: str = Field(description="Where this came from, e.g. a file path, PR/issue URL.")
     snippet: str = Field(description="The relevant excerpt, verbatim from the source.")
-    relevance: float = Field(ge=0.0, le=1.0)
+    relevance: float = Field(
+        ge=0.0, le=1.0, description="How directly this citation supports the summary, 0.0-1.0."
+    )
     sha: str | None = Field(
         default=None, description="Git blob/commit SHA, copied verbatim from the tool output."
     )
 
 
-class ToolCallRecord(BaseModel):
+class ToolCallRecord(StrictBaseModel):
     """One tool invocation actually made during the research loop. Derived
     programmatically from the trajectory's `AIMessage.tool_calls` /
     `ToolMessage` pairs — never asked of the model, since self-reported
@@ -35,7 +40,7 @@ class ToolCallRecord(BaseModel):
     status: Literal["success", "error"]
 
 
-class ResearchSummary(BaseModel):
+class ResearchSummary(StrictBaseModel):
     """The LLM-facing contract: what the Researcher asks the model to
     produce after the tool-calling loop ends. Field `description=`s double
     as the model's instructions, same as `PlannerClassification`."""
@@ -62,7 +67,7 @@ class ResearchSummary(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
-class ResearchFindings(BaseModel):
+class ResearchFindings(StrictBaseModel):
     """Persisted research output. `tool_calls`/`tools_used`/`researched_at`
     are system-derived (see `ToolCallRecord`) rather than LLM-authored — the
     same two-stage split `PlannerOutput` uses over `PlannerClassification`.
@@ -75,10 +80,10 @@ class ResearchFindings(BaseModel):
     as a judgment call the model itself makes per citation."""
 
     summary: str
-    evidence: list[Evidence] = []
-    focus_addressed: list[str] = []
-    gaps: list[str] = []
+    evidence: list[Evidence] = Field(default_factory=list[Evidence])
+    focus_addressed: list[str] = Field(default_factory=list[str])
+    gaps: list[str] = Field(default_factory=list[str])
     confidence: float = Field(ge=0.0, le=1.0)
-    tool_calls: list[ToolCallRecord] = []
-    tools_used: list[str] = []
+    tool_calls: list[ToolCallRecord] = Field(default_factory=list[ToolCallRecord])
+    tools_used: list[str] = Field(default_factory=list[str])
     researched_at: datetime

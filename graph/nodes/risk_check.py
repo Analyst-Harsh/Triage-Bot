@@ -99,7 +99,7 @@ class RiskCheckNode(LLMNode):
             messages = build_risk_judgment_messages(
                 draft, state["research_findings"], judged_indices
             )
-            result = await self.call_structured(messages, RiskJudgmentBatch)
+            result = await self.call_structured(messages, RiskJudgmentBatch, method="json_schema")
             cost_usd = result.estimated_cost_usd
             cache_read_tokens = result.cache_read_tokens
             cache_creation_tokens = result.cache_creation_tokens

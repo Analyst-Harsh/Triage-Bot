@@ -1,5 +1,8 @@
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 from graph.schemas import GroundingCritique
 
 
@@ -25,3 +28,8 @@ def test_json_round_trip() -> None:
     critique = make_critique()
     restored = GroundingCritique.model_validate_json(critique.model_dump_json())
     assert restored == critique
+
+
+def test_rejects_unexpected_field() -> None:
+    with pytest.raises(ValidationError):
+        make_critique(unexpected_field="surprise")

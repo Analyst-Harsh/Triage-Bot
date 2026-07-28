@@ -212,6 +212,7 @@ class DrafterSubgraph(AgentSubgraph[DraftProposal]):
             critique_messages,
             GroundingCritique,
             max_attempts=self._structured_output_max_attempts,
+            method="json_schema",
         )
 
         draft = DraftOutput(

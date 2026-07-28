@@ -1,11 +1,12 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from graph.schemas.base import StrictBaseModel
 from graph.schemas.enums import IssueType
 
 
-class PlannerClassification(BaseModel):
+class PlannerClassification(StrictBaseModel):
     """The LLM-facing contract: exactly what the Planner asks the model to
     produce. Field descriptions flow directly into the structured-output
     tool schema the model sees, so they double as the model's instructions
@@ -25,13 +26,13 @@ class PlannerClassification(BaseModel):
     reasoning: str = Field(description="Brief explanation for why this category was chosen.")
 
 
-class PlannerOutput(BaseModel):
+class PlannerOutput(StrictBaseModel):
     """`classified_at` is a system-derived fact, not something asked of the
     LLM (models hallucinate timestamps) — the node constructs this itself
     from a `PlannerClassification` plus `datetime.now(UTC)`."""
 
     issue_type: IssueType
     classification_confidence: float
-    investigation_plan: list[str] = []
+    investigation_plan: list[str] = Field(default_factory=list[str])
     reasoning: str
     classified_at: datetime

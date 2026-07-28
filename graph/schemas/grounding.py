@@ -1,7 +1,9 @@
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from graph.schemas.base import StrictBaseModel
 
 
-class GroundingCritique(BaseModel):
+class GroundingCritique(StrictBaseModel):
     """The LLM-facing contract for the Drafter's grounding self-check: an
     independent second call (never the same call that produced the draft)
     asked to list any claim in the draft that isn't backed by the supplied

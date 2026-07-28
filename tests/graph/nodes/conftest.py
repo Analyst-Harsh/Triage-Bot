@@ -90,6 +90,12 @@ class FakeStructuredChatModel(BaseChatModel):
     # test assert on the real (possibly clamped/cleared) messages a caller
     # sent, rather than trusting that the caller sent what it intended to.
     received_messages: list[list[BaseMessage]] = Field(default_factory=list[list[BaseMessage]])
+    # Captures the `method`/other kwargs each `with_structured_output` call
+    # actually received -- lets a test assert on which strict/non-strict
+    # mode a call site requested, rather than trusting it was wired correctly.
+    received_structured_output_kwargs: list[dict[str, Any]] = Field(
+        default_factory=list[dict[str, Any]]
+    )
 
     @property
     def _llm_type(self) -> str:
@@ -107,7 +113,9 @@ class FakeStructuredChatModel(BaseChatModel):
             raise RuntimeError("fake API failure")
         return ChatResult(generations=[ChatGeneration(message=self.response)])
 
-    def with_structured_output(self, schema: Any, **kwargs: Any) -> Runnable[Any, Any]:  # noqa: ARG002
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Runnable[Any, Any]:
+        self.received_structured_output_kwargs.append(kwargs)
+
         def _parse(_: AIMessage) -> Any:
             if self.fail_parse:
                 raise ValueError("fake parsing failure")

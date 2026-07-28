@@ -1,11 +1,12 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from graph.schemas.base import StrictBaseModel
 from graph.schemas.enums import ActionType, PostOutcome, RunStatus
 
 
-class EpisodicActionOutcome(BaseModel):
+class EpisodicActionOutcome(StrictBaseModel):
     """One past action plus what actually happened to it -- e.g. `comment`
     that was `posted`, or `code_fix` that was `rejected`. Positional
     correlation (action type <-> per-action outcome) is inherent here since
@@ -16,7 +17,7 @@ class EpisodicActionOutcome(BaseModel):
     outcome: PostOutcome
 
 
-class EpisodicMemoryHit(BaseModel):
+class EpisodicMemoryHit(StrictBaseModel):
     past_issue_number: int
     past_repo: str
     summary: str

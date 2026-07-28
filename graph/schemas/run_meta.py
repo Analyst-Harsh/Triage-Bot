@@ -1,16 +1,18 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import Field
+
+from graph.schemas.base import StrictBaseModel
 
 
-class RunError(BaseModel):
+class RunError(StrictBaseModel):
     node_name: str
     error_message: str
     occurred_at: datetime
 
 
-class RunMeta(BaseModel):
+class RunMeta(StrictBaseModel):
     run_id: UUID
     thread_id: str
     trace_id: str | None = None
@@ -22,7 +24,7 @@ class RunMeta(BaseModel):
     cache_creation_tokens: int = 0
     max_iterations: int
     max_cost_usd: float
-    errors: list[RunError] = []
+    errors: list[RunError] = Field(default_factory=list[RunError])
     # When True (the safe default), AutoPostNode computes per-action post
     # outcomes but skips the actual GitHub write -- the replay pipeline runs
     # against real historical issues in real repos this bot doesn't own.

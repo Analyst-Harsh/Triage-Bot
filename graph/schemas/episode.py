@@ -1,14 +1,13 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
-
+from graph.schemas.base import StrictBaseModel
 from graph.schemas.draft import DraftedAction
 from graph.schemas.enums import IssueType, RiskLevel, RunStatus
 from graph.schemas.post_result import PostResults
 
 
-class Episode(BaseModel):
+class Episode(StrictBaseModel):
     """Persisted episodic-memory record -- what `EpisodicMemoryStore.save_episode`
     writes (as `AsyncPostgresStore.aput`'s JSON `value`) and `find_similar`
     reads back. Never enters `TriageState`/the checkpointer; it's a

@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import structlog
 from langchain_core.callbacks.usage import get_usage_metadata_callback
@@ -74,6 +74,7 @@ async def call_structured[T](
     schema: type[T],
     *,
     max_attempts: int,
+    method: Literal["function_calling", "json_schema"] = "function_calling",
 ) -> LLMResult[T]:
     """Calls `primary` for `schema`-shaped structured output, falling back to
     `fallback` on ANY failure — a raw API error (rate limit, timeout, ...) or
@@ -103,17 +104,21 @@ async def call_structured[T](
     the Researcher's post-loop summarize step) get the same
     fallback+cost-accounting guarantees without going through `TriageNode`.
 
-    `method="function_calling"` (rather than the newer default strict
-    `"json_schema"` mode) because OpenAI's strict Structured Outputs schema
-    validation rejects `oneOf` outright — which is exactly what a Pydantic
-    discriminated union (e.g. `DraftAction`) compiles to. Tool/function-call
-    based structured output has no such restriction and is supported
-    uniformly across providers, so this is the one method that works for
-    every schema shape this function is asked to handle, not just the flat
-    ones used before the Drafter's discriminated-union schemas existed.
+    `method` defaults to `"function_calling"` rather than the newer default
+    strict `"json_schema"` mode because OpenAI's strict Structured Outputs
+    schema validation rejects `oneOf` outright — which is exactly what a
+    Pydantic discriminated union (e.g. `DraftAction`) compiles to.
+    Tool/function-call based structured output has no such restriction and
+    is supported uniformly across providers, so it's the only method that
+    works for every schema shape this function is asked to handle. Callers
+    whose `schema` has no discriminated union (e.g. `PlannerClassification`,
+    `RiskJudgmentBatch`) may pass `method="json_schema"` explicitly to get a
+    real provider-side conformance guarantee instead of best-effort bias —
+    see "Structured-output validation" in `docs/agent/architecture-conventions.md`
+    for which call sites do.
     """
-    primary_structured = primary.with_structured_output(schema, method="function_calling")
-    fallback_structured = fallback.with_structured_output(schema, method="function_calling")
+    primary_structured = primary.with_structured_output(schema, method=method)
+    fallback_structured = fallback.with_structured_output(schema, method=method)
     with get_usage_metadata_callback() as cb:
         # _invoke_with_repair()'s return type is untyped (Any): it forwards
         # whatever with_structured_output() produces, which is itself only

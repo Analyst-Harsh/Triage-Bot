@@ -20,6 +20,7 @@ from graph.schemas.enums import (
     IssueSource,
     IssueType,
     PostOutcome,
+    ResearchToolName,
     RiskLevel,
     RunStatus,
 )
@@ -74,6 +75,7 @@ __all__ = [
     "QueuedActionSummary",
     "ResearchFindings",
     "ResearchSummary",
+    "ResearchToolName",
     "RiskAssessment",
     "RiskJudgmentBatch",
     "RiskLevel",
