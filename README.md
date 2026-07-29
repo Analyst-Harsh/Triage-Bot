@@ -5,7 +5,7 @@
 
 A LangGraph-based agent that triages GitHub issues. A live webhook and a replay pipeline of backfilled OSS issues both feed the same pipeline — **Planner → Researcher → Drafter → Risk check → Auto-post/Approval queue** — with every outcome logged to episodic memory, checkpointed via Postgres, and traced via OpenTelemetry + Langfuse.
 
-The project is early-stage: the state schema (`graph/schemas/`, `graph/state.py`) is implemented and tested; the graph nodes, FastAPI webhook/replay entry points (`api/`), and agent tools (`tools/`) are still being built.
+The full pipeline is live: Planner, Researcher, Drafter (with sandboxed code-fix verification), Risk check, and Auto-post/Approval queue are all implemented and have opened real pull requests and comments against a live test repo — see `docs/agent/security.md`'s "Red-team validation" section for adversarial testing against real issues. The FastAPI webhook entry point (`api/`) and ops dashboard are still being built; today's entry point is the replay pipeline (`main.py`) below.
 
 ## Quickstart
 
@@ -35,7 +35,7 @@ docker compose up -d           # starts local pgvector-enabled Postgres + Admine
 |---|---|
 | **Architecture, pipeline, product vision** | [`docs/summary.md`](docs/summary.md) |
 | **Engineering standards & agent operating rules** | [`AGENTS.md`](AGENTS.md) |
-| **Security threat model & secrets handling** | [`docs/agent/security.md`](docs/agent/security.md) |
+| **Security threat model, secrets handling & OWASP red-team testing** | [`docs/agent/security.md`](docs/agent/security.md) |
 | **Design-pattern rationale** | [`docs/agent/engineering-standards.md`](docs/agent/engineering-standards.md) |
 | **State schema & module conventions** | [`docs/agent/architecture-conventions.md`](docs/agent/architecture-conventions.md) |
 | **Reporting a vulnerability** | [`SECURITY.md`](SECURITY.md) |
