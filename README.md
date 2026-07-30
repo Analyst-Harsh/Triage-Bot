@@ -4,12 +4,27 @@
 
 | Name                                             |    Stmts |     Miss |   Cover |   Missing |
 |------------------------------------------------- | -------: | -------: | ------: | --------: |
+| api/\_\_init\_\_.py                              |        0 |        0 |    100% |           |
+| api/app.py                                       |       37 |        0 |    100% |           |
+| api/dependencies.py                              |       30 |        1 |     97% |        61 |
+| api/errors.py                                    |        6 |        0 |    100% |           |
+| api/routers/\_\_init\_\_.py                      |        0 |        0 |    100% |           |
+| api/routers/runs.py                              |       72 |        2 |     97% |   104-105 |
+| api/routers/webhooks.py                          |       41 |        0 |    100% |           |
+| api/schemas/\_\_init\_\_.py                      |        6 |        0 |    100% |           |
+| api/schemas/detail\_response.py                  |        2 |        0 |    100% |           |
+| api/schemas/error\_detail.py                     |        5 |        0 |    100% |           |
+| api/schemas/github\_webhook.py                   |       15 |        0 |    100% |           |
+| api/schemas/retry\_request.py                    |        3 |        0 |    100% |           |
+| api/schemas/run\_accepted\_response.py           |        5 |        0 |    100% |           |
 | config/\_\_init\_\_.py                           |        2 |        0 |    100% |           |
-| config/guardrail\_settings.py                    |       16 |        0 |    100% |           |
-| config/settings.py                               |       33 |        0 |    100% |           |
+| config/guardrail\_settings.py                    |       20 |        0 |    100% |           |
+| config/settings.py                               |       35 |        0 |    100% |           |
+| db/\_\_init\_\_.py                               |        2 |        0 |    100% |           |
+| db/engine.py                                     |       16 |        0 |    100% |           |
 | graph/\_\_init\_\_.py                            |        0 |        0 |    100% |           |
 | graph/builder.py                                 |       43 |        0 |    100% |           |
-| graph/checkpointer.py                            |       15 |        0 |    100% |           |
+| graph/checkpointer.py                            |       24 |        0 |    100% |           |
 | graph/errors.py                                  |        8 |        0 |    100% |           |
 | graph/nodes/\_\_init\_\_.py                      |       13 |        0 |    100% |           |
 | graph/nodes/agent\_subgraph.py                   |       98 |       10 |     90% |141-147, 155, 165, 190 |
@@ -38,7 +53,7 @@
 | graph/schemas/approval\_request.py               |       17 |        0 |    100% |           |
 | graph/schemas/base.py                            |        3 |        0 |    100% |           |
 | graph/schemas/draft.py                           |       13 |        0 |    100% |           |
-| graph/schemas/enums.py                           |       42 |        0 |    100% |           |
+| graph/schemas/enums.py                           |       45 |        0 |    100% |           |
 | graph/schemas/episode.py                         |        9 |        0 |    100% |           |
 | graph/schemas/grounding.py                       |        4 |        0 |    100% |           |
 | graph/schemas/issue.py                           |        8 |        0 |    100% |           |
@@ -49,7 +64,7 @@
 | graph/schemas/risk.py                            |       15 |        0 |    100% |           |
 | graph/schemas/run\_meta.py                       |       18 |        0 |    100% |           |
 | graph/schemas/sandbox.py                         |        5 |        0 |    100% |           |
-| graph/state.py                                   |        9 |        0 |    100% |           |
+| graph/state.py                                   |       11 |        0 |    100% |           |
 | llm/\_\_init\_\_.py                              |        6 |        0 |    100% |           |
 | llm/config.py                                    |        5 |        0 |    100% |           |
 | llm/factory.py                                   |       11 |        0 |    100% |           |
@@ -57,6 +72,9 @@
 | llm/result.py                                    |        5 |        0 |    100% |           |
 | llm/structured.py                                |       42 |        1 |     98% |        67 |
 | main.py                                          |       85 |       32 |     62% |52-55, 70-76, 126-215, 224 |
+| models/\_\_init\_\_.py                           |        2 |        0 |    100% |           |
+| models/base.py                                   |        2 |        0 |    100% |           |
+| models/triage\_run.py                            |       12 |        0 |    100% |           |
 | observability/\_\_init\_\_.py                    |        0 |        0 |    100% |           |
 | observability/logging\_config.py                 |       21 |        0 |    100% |           |
 | observability/tracing.py                         |       38 |        7 |     82% |154-168, 189-190 |
@@ -65,6 +83,12 @@
 | prompts/planner.py                               |       15 |        0 |    100% |           |
 | prompts/researcher.py                            |       11 |        0 |    100% |           |
 | prompts/risk\_check.py                           |       17 |        0 |    100% |           |
+| repositories/\_\_init\_\_.py                     |        2 |        0 |    100% |           |
+| repositories/triage\_run\_repository.py          |       57 |        0 |    100% |           |
+| services/\_\_init\_\_.py                         |        3 |        0 |    100% |           |
+| services/errors.py                               |       51 |        0 |    100% |           |
+| services/triage\_run\_record.py                  |        7 |        0 |    100% |           |
+| services/triage\_run\_service.py                 |      117 |        4 |     97% |190, 196-202 |
 | tools/\_\_init\_\_.py                            |        0 |        0 |    100% |           |
 | tools/mcp\_clients.py                            |       50 |        9 |     82% |   102-110 |
 | tools/sandbox.py                                 |      393 |       17 |     96% |110-111, 113, 203, 439, 484-486, 510-511, 635-642, 971, 974, 977, 982, 985 |
@@ -72,7 +96,8 @@
 | utils/diff\_applier.py                           |      105 |        8 |     92% |35, 51, 67-68, 90, 96, 116, 200 |
 | utils/episodic\_memory\_store.py                 |       68 |       10 |     85% |68, 82, 230-248 |
 | utils/github\_client.py                          |       71 |        1 |     99% |       148 |
-| **TOTAL**                                        | **2169** |  **117** | **95%** |           |
+| utils/postgres\_pool.py                          |       12 |        0 |    100% |           |
+| **TOTAL**                                        | **2694** |  **124** | **95%** |           |
 
 
 ## Setup coverage badge
