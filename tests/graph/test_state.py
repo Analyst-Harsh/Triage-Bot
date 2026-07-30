@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
@@ -26,7 +27,7 @@ from graph.schemas import (
     SandboxResult,
     ToolCallRecord,
 )
-from graph.state import TriageState, create_initial_state
+from graph.state import TriageState, create_initial_state, thread_id_for
 
 
 def make_issue() -> IssuePayload:
@@ -173,6 +174,31 @@ def test_create_initial_state_defaults_trace_id_to_none() -> None:
     state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
 
     assert state["run_meta"].trace_id is None
+
+
+def test_thread_id_for_formats_repo_hash_issue_number() -> None:
+    assert thread_id_for("octo/repo", 42) == "octo/repo#42"
+
+
+def test_create_initial_state_uses_explicit_run_id_when_given() -> None:
+    run_id = uuid4()
+
+    state = create_initial_state(make_issue(), max_iterations=10, max_cost_usd=1.0, run_id=run_id)
+
+    assert state["run_meta"].run_id == run_id
+
+
+def test_create_initial_state_generates_run_id_when_omitted() -> None:
+    state = create_initial_state(make_issue(), max_iterations=10, max_cost_usd=1.0)
+
+    assert state["run_meta"].run_id is not None
+
+
+def test_create_initial_state_generates_distinct_run_ids_across_calls() -> None:
+    first = create_initial_state(make_issue(), max_iterations=10, max_cost_usd=1.0)
+    second = create_initial_state(make_issue(), max_iterations=10, max_cost_usd=1.0)
+
+    assert first["run_meta"].run_id != second["run_meta"].run_id
 
 
 def test_checkpoint_serde_round_trip_on_initial_state_with_trace_id() -> None:

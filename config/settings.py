@@ -43,10 +43,13 @@ class Settings(BaseSettings):
     drafter_test_log_success_max_chars: int = 500
     drafter_test_log_failure_max_chars: int = 3_000
 
-    # Episodic memory (Postgres + pgvector). Unset by default -- mirrors
-    # docmind_mcp_command's optional-feature pattern: nodes degrade to a
-    # no-op NullEpisodicMemoryStore rather than requiring this store.
-    episodic_memory_database_url: str | None = None
+    # Postgres+pgvector connection string, shared by the episodic memory
+    # store, the production (Postgres) checkpointer, and the triage_runs
+    # tracking table -- one Postgres instance, one connection string.
+    # Unset by default; every consumer degrades gracefully (episodic memory
+    # to NullEpisodicMemoryStore) except the API (api/app.py), which
+    # requires it -- there is no meaningful "off" state for checkpointing.
+    database_url: SecretStr | None = None
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
     episodic_memory_top_k: int = 3
@@ -63,6 +66,17 @@ class Settings(BaseSettings):
     langfuse_public_key: SecretStr | None = None
     langfuse_secret_key: SecretStr | None = None
     langfuse_host: str = "https://cloud.langfuse.com"
+
+    # HMAC secret verifying X-Hub-Signature-256 on inbound GitHub webhook
+    # deliveries (api/routers/webhooks.py). Unset means the webhook route
+    # refuses every request with 503 rather than silently accepting
+    # unverifiable ones.
+    github_webhook_secret: SecretStr | None = None
+
+    # Static bearer token protecting the operator-facing API routes
+    # (api/routers/runs.py) -- not the webhook route, which is
+    # authenticated by github_webhook_secret's HMAC instead.
+    api_bearer_token: SecretStr | None = None
 
 
 @lru_cache

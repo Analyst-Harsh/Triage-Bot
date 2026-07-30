@@ -3,8 +3,12 @@ from contextlib import asynccontextmanager
 from inspect import isclass
 
 import aiosqlite
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from psycopg import AsyncConnection
+from psycopg.rows import DictRow
+from psycopg_pool import AsyncConnectionPool
 
 from graph import schemas as graph_schemas
 
@@ -37,14 +41,10 @@ def _build_checkpoint_serde() -> JsonPlusSerializer:
 async def sqlite_checkpointer(
     db_path: str = DEFAULT_CHECKPOINT_DB_PATH,
 ) -> AsyncGenerator[AsyncSqliteSaver]:
-    """Local-dev checkpointer factory: a SQLite-backed `AsyncSqliteSaver`
-    scoped to the connection's lifetime. Production will get its own
-    Postgres-backed factory once `api/` lands (see AGENTS.md) --
-    `langgraph.checkpoint.postgres.aio.AsyncPostgresSaver` is already
-    available for this via `langgraph-checkpoint-postgres` (the same
-    dependency `utils/episodic_memory_store.py`'s `AsyncPostgresStore` uses),
-    so no new dependency is needed when that lands; its `from_conn_string()`
-    is an async context manager with the same shape as this one.
+    """Local-dev/replay checkpointer factory: a SQLite-backed
+    `AsyncSqliteSaver` scoped to the connection's lifetime. `main.py` (the
+    replay pipeline) and this module's own tests are its only callers --
+    production (`api/app.py`) uses `postgres_checkpointer` below instead.
 
     Opens the connection directly (mirroring what
     `AsyncSqliteSaver.from_conn_string` does internally) rather than using
@@ -53,3 +53,30 @@ async def sqlite_checkpointer(
     """
     async with aiosqlite.connect(db_path) as conn:
         yield AsyncSqliteSaver(conn, serde=_build_checkpoint_serde())
+
+
+@asynccontextmanager
+async def postgres_checkpointer(
+    pool: AsyncConnectionPool[AsyncConnection[DictRow]],
+) -> AsyncGenerator[AsyncPostgresSaver]:
+    """Production checkpointer factory: builds an `AsyncPostgresSaver` over
+    an already-open, externally-owned connection pool (see
+    `utils.postgres_pool`) -- shared with the episodic memory store's own
+    pool only in the sense of pointing at the same Postgres instance, not
+    the same pool object (that store opens its own via `from_conn_string`).
+    `AsyncPostgresSaver.__init__` accepts a pool directly (confirmed against
+    `langgraph.checkpoint.postgres._ainternal.Conn`'s type alias:
+    `AsyncConnection[DictRow] | AsyncConnectionPool[AsyncConnection[DictRow]]`),
+    so no per-checkpointer pool is created here. Runs `.setup()` once --
+    idempotent, safe on every process start, the same convention
+    `utils/episodic_memory_store.py`'s `pg_store.setup()` already uses --
+    before yielding.
+
+    Uses the same schema-aware serde as `sqlite_checkpointer` (see
+    `_build_checkpoint_serde`'s docstring for why): checkpoint bytes are the
+    same deserialization-attack surface regardless of which database stores
+    them.
+    """
+    saver = AsyncPostgresSaver(pool, serde=_build_checkpoint_serde())
+    await saver.setup()
+    yield saver
