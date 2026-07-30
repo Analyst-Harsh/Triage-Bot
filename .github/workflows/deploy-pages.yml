@@ -61,8 +61,27 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Configure Pages
+        id: configure
         uses: actions/configure-pages@v6
 
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v5
+
+      - name: Job summary
+        if: always()
+        run: |
+          icon() { case "$1" in success) echo "✅";; failure) echo "❌";; skipped) echo "⏭️";; *) echo "⚠️";; esac; }
+          {
+            echo "### Deploy Pages"
+            echo ""
+            echo "| Step | Result |"
+            echo "|---|---|"
+            echo "| Build | $(icon ${{ needs.build.result }}) |"
+            echo "| Configure Pages | $(icon ${{ steps.configure.outcome }}) |"
+            echo "| Deploy | $(icon ${{ steps.deployment.outcome }}) |"
+            if [ -n "${{ steps.deployment.outputs.page_url }}" ]; then
+              echo ""
+              echo "**Live site:** ${{ steps.deployment.outputs.page_url }}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
