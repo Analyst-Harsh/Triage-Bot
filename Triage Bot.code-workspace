@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "backend",
+			"path": "."
+		},
+		{
+			"name": "website",
+			"path": "github_page"
+		}
+	],
+	"settings": {}
+}

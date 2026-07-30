@@ -1,32 +1,30 @@
-# React + TypeScript + Vite
+# Triage Bot — Marketing / Portfolio Site
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The public-facing landing page for [Triage Bot](../README.md), live at [analyst-harsh.github.io/Triage-Bot](https://analyst-harsh.github.io/Triage-Bot/). Tagline: *"Issues in. Judgment out."*
 
-Currently, two official plugins are available:
+> **Note:** the dashboard visual on this site (`DashboardMock`) is an illustrative concept image, not a real product screenshot — no live ops-dashboard UI exists yet. See the root README's [Dashboard API](../README.md#dashboard-api) section for what's actually built and running today.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Stack
 
-## React Compiler
+React 19, Vite, TypeScript, Three.js / `@react-three/fiber` (hero visuals), GSAP (scroll-driven animation), Tailwind CSS v4, Oxlint.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Run locally
 
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Build
+
+```bash
+npm run build   # tsc -b && vite build, outputs to dist/
+```
+
+## Deploy
+
+Automatic — `.github/workflows/deploy-pages.yml` builds and deploys this directory to GitHub Pages on every push to `main` that touches `github_page/**`. There's no manual deploy step.
+
+---
+
+See the root [README.md](../README.md) for the actual agent/pipeline this site describes.
