@@ -5,18 +5,23 @@
 | Name                                             |    Stmts |     Miss |   Cover |   Missing |
 |------------------------------------------------- | -------: | -------: | ------: | --------: |
 | api/\_\_init\_\_.py                              |        0 |        0 |    100% |           |
-| api/app.py                                       |       37 |        0 |    100% |           |
+| api/app.py                                       |       39 |        0 |    100% |           |
 | api/dependencies.py                              |       30 |        1 |     97% |        61 |
 | api/errors.py                                    |        6 |        0 |    100% |           |
 | api/routers/\_\_init\_\_.py                      |        0 |        0 |    100% |           |
-| api/routers/runs.py                              |       72 |        2 |     97% |   104-105 |
+| api/routers/runs.py                              |       79 |        2 |     97% |   116-117 |
+| api/routers/runs\_collection.py                  |       12 |        0 |    100% |           |
 | api/routers/webhooks.py                          |       41 |        0 |    100% |           |
-| api/schemas/\_\_init\_\_.py                      |        6 |        0 |    100% |           |
+| api/schemas/\_\_init\_\_.py                      |       10 |        0 |    100% |           |
 | api/schemas/detail\_response.py                  |        2 |        0 |    100% |           |
 | api/schemas/error\_detail.py                     |        5 |        0 |    100% |           |
 | api/schemas/github\_webhook.py                   |       15 |        0 |    100% |           |
 | api/schemas/retry\_request.py                    |        3 |        0 |    100% |           |
 | api/schemas/run\_accepted\_response.py           |        5 |        0 |    100% |           |
+| api/schemas/run\_detail\_response.py             |        4 |        0 |    100% |           |
+| api/schemas/run\_list\_response.py               |        3 |        0 |    100% |           |
+| api/schemas/run\_summary.py                      |       27 |        0 |    100% |           |
+| api/schemas/run\_summary\_response.py            |        3 |        0 |    100% |           |
 | config/\_\_init\_\_.py                           |        2 |        0 |    100% |           |
 | config/guardrail\_settings.py                    |       20 |        0 |    100% |           |
 | config/settings.py                               |       35 |        0 |    100% |           |
@@ -84,11 +89,11 @@
 | prompts/researcher.py                            |       11 |        0 |    100% |           |
 | prompts/risk\_check.py                           |       17 |        0 |    100% |           |
 | repositories/\_\_init\_\_.py                     |        2 |        0 |    100% |           |
-| repositories/triage\_run\_repository.py          |       57 |        0 |    100% |           |
+| repositories/triage\_run\_repository.py          |       91 |        0 |    100% |           |
 | services/\_\_init\_\_.py                         |        3 |        0 |    100% |           |
 | services/errors.py                               |       51 |        0 |    100% |           |
 | services/triage\_run\_record.py                  |        7 |        0 |    100% |           |
-| services/triage\_run\_service.py                 |      117 |        4 |     97% |190, 196-202 |
+| services/triage\_run\_service.py                 |      144 |        3 |     98% |261, 273-278 |
 | tools/\_\_init\_\_.py                            |        0 |        0 |    100% |           |
 | tools/mcp\_clients.py                            |       50 |        9 |     82% |   102-110 |
 | tools/sandbox.py                                 |      393 |       17 |     96% |110-111, 113, 203, 439, 484-486, 510-511, 635-642, 971, 974, 977, 982, 985 |
@@ -97,7 +102,7 @@
 | utils/episodic\_memory\_store.py                 |       68 |       10 |     85% |68, 82, 230-248 |
 | utils/github\_client.py                          |       71 |        1 |     99% |       148 |
 | utils/postgres\_pool.py                          |       12 |        0 |    100% |           |
-| **TOTAL**                                        | **2694** |  **124** | **95%** |           |
+| **TOTAL**                                        | **2817** |  **123** | **96%** |           |
 
 
 ## Setup coverage badge
