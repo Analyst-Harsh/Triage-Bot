@@ -1,0 +1,611 @@
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator, Callable
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from typing import Any
+from uuid import UUID, uuid4
+
+import pytest
+from github import GithubException
+from langchain_core.runnables import RunnableConfig
+from langgraph.types import Command
+
+import services.triage_run_service as service_module
+from graph.nodes.node_names import NodeName
+from graph.schemas import (
+    ActionType,
+    ApprovalDecision,
+    ApprovalRequest,
+    IssuePayload,
+    IssueSource,
+    RiskLevel,
+    RunStatus,
+)
+from graph.schemas.approval_decision import ActionDecision
+from graph.schemas.approval_request import QueuedActionSummary
+from services.errors import (
+    DecisionMismatchError,
+    IssueFetchError,
+    RetryLimitExceededError,
+    RunAlreadyInFlightError,
+    RunNotFailedError,
+    RunNotFoundError,
+)
+from services.triage_run_record import TriageRunRecord
+from services.triage_run_service import TriageRunService, validate_decision_matches
+from utils.github_client import GitHubClient
+
+
+def make_issue(**overrides: Any) -> IssuePayload:
+    defaults: dict[str, Any] = {
+        "repo_full_name": "octo/repo",
+        "issue_number": 42,
+        "title": "Crash on startup",
+        "body": "App crashes with a NoneType error.",
+        "author": "octocat",
+        "created_at": datetime.now(UTC),
+        "url": "https://github.com/octo/repo/issues/42",
+        "source": IssueSource.WEBHOOK,
+    }
+    defaults.update(overrides)
+    return IssuePayload(**defaults)
+
+
+def make_record(**overrides: Any) -> TriageRunRecord:
+    now = datetime.now(UTC)
+    defaults: dict[str, Any] = {
+        "thread_id": "octo/repo#42",
+        "run_id": uuid4(),
+        "repo_full_name": "octo/repo",
+        "issue_number": 42,
+        "issue_title": "Crash on startup",
+        "issue_url": "https://github.com/octo/repo/issues/42",
+        "source": IssueSource.WEBHOOK,
+        "status": RunStatus.FAILED,
+        "resume_in_progress": False,
+        "retry_count": 0,
+        "error_message": "boom",
+        "dry_run": True,
+        "started_at": now,
+        "updated_at": now,
+        "completed_at": now,
+    }
+    defaults.update(overrides)
+    return TriageRunRecord(**defaults)
+
+
+def make_request(**overrides: Any) -> ApprovalRequest:
+    defaults: dict[str, Any] = {
+        "run_id": uuid4(),
+        "repo_full_name": "octo/repo",
+        "issue_number": 42,
+        "issue_url": "https://github.com/octo/repo/issues/42",
+        "actions": [
+            QueuedActionSummary(
+                index=0,
+                action_type=ActionType.COMMENT,
+                summary="s",
+                rationale="r",
+                risk_level=RiskLevel.MEDIUM,
+                risk_reasoning="rr",
+            )
+        ],
+        "requested_at": datetime.now(UTC),
+    }
+    defaults.update(overrides)
+    return ApprovalRequest(**defaults)
+
+
+class _FakeRunsRepository:
+    def __init__(
+        self,
+        *,
+        claim_fresh_result: Any = "unset",
+        claim_retry_result: Any = "unset",
+        claim_resume_result: Any = "unset",
+        get_result: Any = None,
+    ) -> None:
+        self._claim_fresh_result = claim_fresh_result
+        self._claim_retry_result = claim_retry_result
+        self._claim_resume_result = claim_resume_result
+        self._get_result = get_result
+        self.claim_fresh_calls: list[dict[str, Any]] = []
+        self.claim_retry_calls: list[dict[str, Any]] = []
+        self.claim_resume_calls: list[str] = []
+        self.release_resume_lock_calls: list[str] = []
+        self.update_status_calls: list[tuple[str, RunStatus]] = []
+        self.mark_failed_calls: list[tuple[str, str]] = []
+        self.mark_terminal_calls: list[tuple[str, RunStatus]] = []
+
+    async def claim_fresh_run(self, issue: IssuePayload, *, run_id: UUID, dry_run: bool) -> Any:
+        self.claim_fresh_calls.append({"issue": issue, "run_id": run_id, "dry_run": dry_run})
+        return None if self._claim_fresh_result == "unset" else self._claim_fresh_result
+
+    async def claim_retry(self, thread_id: str, *, run_id: UUID, dry_run: bool) -> Any:
+        self.claim_retry_calls.append(
+            {"thread_id": thread_id, "run_id": run_id, "dry_run": dry_run}
+        )
+        return None if self._claim_retry_result == "unset" else self._claim_retry_result
+
+    async def claim_resume(self, thread_id: str) -> Any:
+        self.claim_resume_calls.append(thread_id)
+        return None if self._claim_resume_result == "unset" else self._claim_resume_result
+
+    async def release_resume_lock(self, thread_id: str) -> None:
+        self.release_resume_lock_calls.append(thread_id)
+
+    async def update_status(self, thread_id: str, *, status: RunStatus) -> None:
+        self.update_status_calls.append((thread_id, status))
+
+    async def mark_failed(self, thread_id: str, *, error_message: str) -> None:
+        self.mark_failed_calls.append((thread_id, error_message))
+
+    async def mark_terminal(self, thread_id: str, *, status: RunStatus) -> None:
+        self.mark_terminal_calls.append((thread_id, status))
+
+    async def get(self, thread_id: str) -> Any:  # noqa: ARG002
+        return self._get_result
+
+
+class _FakeGitHubClient(GitHubClient):
+    """Subclasses `GitHubClient` and overrides `__init__` rather than
+    duck-typing a standalone class -- the convention `utils/github_client.py`
+    itself documents and `tests/utils/test_github_client.py::_FakeGitHubClient`
+    already follows. `self._github` is set to a harmless placeholder (never
+    a real PyGithub client) so the inherited `raw` property still works
+    without calling `super().__init__()`."""
+
+    def __init__(
+        self, *, issue: IssuePayload | None = None, error: Exception | None = None
+    ) -> None:
+        self._github = object()
+        self._issue = issue
+        self._error = error
+        self.fetch_calls: list[tuple[str, int]] = []
+
+    def fetch_issue(self, repo_full_name: str, issue_number: int) -> IssuePayload:
+        self.fetch_calls.append((repo_full_name, issue_number))
+        if self._error is not None:
+            raise self._error
+        assert self._issue is not None
+        return self._issue
+
+
+class _FakeGuardrails:
+    max_retry_attempts = 3
+    default_max_iterations = 10
+    default_max_cost_usd = 1.0
+
+
+class _FakeSettings:
+    guardrails = _FakeGuardrails()
+
+
+class _FakeSnapshot:
+    def __init__(self, next_: tuple[Any, ...], interrupt_value: object = None) -> None:
+        self.next = next_
+        self.interrupts = [_FakeInterrupt(interrupt_value)] if interrupt_value is not None else []
+
+
+class _FakeInterrupt:
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+
+class _FakeGraph:
+    def __init__(
+        self,
+        *,
+        snapshot: _FakeSnapshot | None = None,
+        stream_chunks: list[dict[str, Any]] | None = None,
+        raise_error: Exception | None = None,
+    ) -> None:
+        self._snapshot = snapshot
+        self._stream_chunks = stream_chunks or []
+        self._raise_error = raise_error
+        self.astream_inputs: list[Any] = []
+
+    async def aget_state(
+        self,
+        config: RunnableConfig,  # noqa: ARG002
+    ) -> _FakeSnapshot:
+        assert self._snapshot is not None
+        return self._snapshot
+
+    async def astream(
+        self,
+        input_: Any,
+        config: RunnableConfig,  # noqa: ARG002
+        stream_mode: str,  # noqa: ARG002
+    ) -> Any:
+        self.astream_inputs.append(input_)
+        if self._raise_error is not None:
+            raise self._raise_error
+        for chunk in self._stream_chunks:
+            yield chunk
+
+
+def _graph_factory(fake_graph: _FakeGraph) -> Callable[..., _FakeGraph]:
+    """A typed stand-in for `lambda **kwargs: fake_graph` -- lambdas can't
+    carry a `**kwargs: object` annotation, which strict pyright otherwise
+    flags as an untyped parameter."""
+
+    def _build_graph(**_kwargs: object) -> _FakeGraph:
+        return fake_graph
+
+    return _build_graph
+
+
+def make_service(
+    *,
+    repo: _FakeRunsRepository | None = None,
+    github_client: Any = None,
+    settings: Any = None,
+) -> TriageRunService:
+    return TriageRunService(
+        settings=settings if settings is not None else _FakeSettings(),  # type: ignore[arg-type]
+        checkpointer=object(),  # type: ignore[arg-type]
+        researcher_tools=[],
+        memory_store=object(),  # type: ignore[arg-type]
+        github_client=(github_client if github_client is not None else _FakeGitHubClient()),
+        runs_repo=repo if repo is not None else _FakeRunsRepository(),  # type: ignore[arg-type]
+    )
+
+
+# --- claim_fresh_run --------------------------------------------------------
+
+
+async def test_claim_fresh_run_raises_when_repository_returns_none() -> None:
+    repo = _FakeRunsRepository(claim_fresh_result=None)
+    service = make_service(repo=repo)
+
+    with pytest.raises(RunAlreadyInFlightError):
+        await service.claim_fresh_run(make_issue(), run_id=uuid4(), dry_run=True)
+
+
+async def test_claim_fresh_run_succeeds_and_passes_dry_run_through() -> None:
+    repo = _FakeRunsRepository(claim_fresh_result=make_record())
+    service = make_service(repo=repo)
+
+    await service.claim_fresh_run(make_issue(), run_id=uuid4(), dry_run=False)
+
+    assert len(repo.claim_fresh_calls) == 1
+    assert repo.claim_fresh_calls[0]["dry_run"] is False
+
+
+# --- get_run -----------------------------------------------------------------
+
+
+async def test_get_run_converts_orm_row_to_record() -> None:
+    row = make_record()
+    repo = _FakeRunsRepository(get_result=row)
+    service = make_service(repo=repo)
+
+    result = await service.get_run("octo/repo#42")
+
+    assert result == row
+
+
+async def test_get_run_returns_none_when_no_row() -> None:
+    repo = _FakeRunsRepository(get_result=None)
+    service = make_service(repo=repo)
+
+    assert await service.get_run("octo/repo#42") is None
+
+
+# --- claim_resume ------------------------------------------------------------
+
+
+async def test_claim_resume_raises_when_repository_returns_none() -> None:
+    repo = _FakeRunsRepository(claim_resume_result=None)
+    service = make_service(repo=repo)
+
+    with pytest.raises(RunAlreadyInFlightError):
+        await service.claim_resume("octo/repo#42")
+
+
+async def test_claim_resume_succeeds_when_repository_returns_a_record() -> None:
+    repo = _FakeRunsRepository(claim_resume_result=make_record(status=RunStatus.PENDING_APPROVAL))
+    service = make_service(repo=repo)
+
+    await service.claim_resume("octo/repo#42")
+
+    assert repo.claim_resume_calls == ["octo/repo#42"]
+
+
+# --- validate_decision_matches ------------------------------------------------
+
+
+def test_validate_decision_matches_raises_on_mismatch() -> None:
+    request = make_request()
+    decision = ApprovalDecision(decisions=[ActionDecision(index=99, approved=True)])
+
+    with pytest.raises(DecisionMismatchError):
+        validate_decision_matches(request, decision)
+
+
+def test_validate_decision_matches_passes_on_exact_match() -> None:
+    request = make_request()
+    decision = ApprovalDecision(decisions=[ActionDecision(index=0, approved=True)])
+
+    validate_decision_matches(request, decision)  # must not raise
+
+
+def test_validate_decision_matches_raises_on_duplicate_indices() -> None:
+    request = make_request(
+        actions=[
+            QueuedActionSummary(
+                index=0,
+                action_type=ActionType.COMMENT,
+                summary="s",
+                rationale="r",
+                risk_level=RiskLevel.MEDIUM,
+                risk_reasoning="rr",
+            ),
+            QueuedActionSummary(
+                index=1,
+                action_type=ActionType.LABEL,
+                summary="s2",
+                rationale="r2",
+                risk_level=RiskLevel.LOW,
+                risk_reasoning="rr2",
+            ),
+        ]
+    )
+    decision = ApprovalDecision(
+        decisions=[
+            ActionDecision(index=0, approved=True),
+            ActionDecision(index=0, approved=False),
+        ]
+    )
+
+    with pytest.raises(DecisionMismatchError):
+        validate_decision_matches(request, decision)
+
+
+# --- prepare_retry -------------------------------------------------------------
+
+
+async def test_prepare_retry_raises_when_no_run_found() -> None:
+    repo = _FakeRunsRepository(get_result=None)
+    service = make_service(repo=repo)
+
+    with pytest.raises(RunNotFoundError):
+        await service.prepare_retry("octo/repo#42", dry_run_override=None)
+
+
+async def test_prepare_retry_raises_when_status_is_not_failed() -> None:
+    repo = _FakeRunsRepository(get_result=make_record(status=RunStatus.PENDING_APPROVAL))
+    service = make_service(repo=repo)
+
+    with pytest.raises(RunNotFailedError) as excinfo:
+        await service.prepare_retry("octo/repo#42", dry_run_override=None)
+    assert excinfo.value.current_status == RunStatus.PENDING_APPROVAL
+
+
+async def test_prepare_retry_raises_when_retry_limit_exceeded() -> None:
+    repo = _FakeRunsRepository(get_result=make_record(retry_count=3))
+    service = make_service(repo=repo)
+
+    with pytest.raises(RetryLimitExceededError):
+        await service.prepare_retry("octo/repo#42", dry_run_override=None)
+
+
+async def test_prepare_retry_raises_issue_fetch_error_before_claiming() -> None:
+    repo = _FakeRunsRepository(get_result=make_record(), claim_retry_result=make_record())
+    github_client = _FakeGitHubClient(error=GithubException(404, {}, {}))
+    service = make_service(repo=repo, github_client=github_client)
+
+    with pytest.raises(IssueFetchError):
+        await service.prepare_retry("octo/repo#42", dry_run_override=None)
+
+    assert repo.claim_retry_calls == []  # never reached the claim step
+
+
+async def test_prepare_retry_raises_when_claim_lost() -> None:
+    repo = _FakeRunsRepository(get_result=make_record(), claim_retry_result=None)
+    github_client = _FakeGitHubClient(issue=make_issue())
+    service = make_service(repo=repo, github_client=github_client)
+
+    with pytest.raises(RunAlreadyInFlightError):
+        await service.prepare_retry("octo/repo#42", dry_run_override=None)
+
+
+async def test_prepare_retry_succeeds_and_reuses_stored_dry_run_by_default() -> None:
+    record = make_record(dry_run=False)
+    repo = _FakeRunsRepository(get_result=record, claim_retry_result=record)
+    issue = make_issue()
+    github_client = _FakeGitHubClient(issue=issue)
+    service = make_service(repo=repo, github_client=github_client)
+
+    returned_issue, run_id = await service.prepare_retry("octo/repo#42", dry_run_override=None)
+
+    assert returned_issue is issue
+    assert isinstance(run_id, UUID)
+    assert repo.claim_retry_calls[0]["dry_run"] is False
+
+
+async def test_prepare_retry_honors_explicit_dry_run_override() -> None:
+    record = make_record(dry_run=False)
+    repo = _FakeRunsRepository(get_result=record, claim_retry_result=record)
+    github_client = _FakeGitHubClient(issue=make_issue())
+    service = make_service(repo=repo, github_client=github_client)
+
+    await service.prepare_retry("octo/repo#42", dry_run_override=True)
+
+    assert repo.claim_retry_calls[0]["dry_run"] is True
+
+
+# --- get_pending_approval ------------------------------------------------------
+
+
+async def test_get_pending_approval_returns_none_when_not_paused(monkeypatch: Any) -> None:
+    fake_graph = _FakeGraph(snapshot=_FakeSnapshot(next_=()))
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    service = make_service()
+
+    assert await service.get_pending_approval("octo/repo#42") is None
+
+
+async def test_get_pending_approval_returns_request_when_paused(monkeypatch: Any) -> None:
+    payload = make_request().model_dump(mode="json")
+    fake_graph = _FakeGraph(
+        snapshot=_FakeSnapshot(next_=(NodeName.APPROVAL_QUEUE,), interrupt_value=payload)
+    )
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    service = make_service()
+
+    request = await service.get_pending_approval("octo/repo#42")
+
+    assert request is not None
+    assert request.repo_full_name == "octo/repo"
+
+
+# --- run_fresh / run_resume (the graph-driving methods) ------------------------
+
+
+@asynccontextmanager
+async def _fake_sandbox_toolset(
+    *_args: Any, **_kwargs: Any
+) -> AsyncGenerator[tuple[list[Any], None]]:
+    yield [], None
+
+
+async def test_run_fresh_streams_status_updates_and_releases_lock(monkeypatch: Any) -> None:
+    chunks: list[dict[str, Any]] = [
+        {"planner": {}},
+        {"auto_post": {"status": RunStatus.PENDING_APPROVAL}},
+        {"__interrupt__": ()},
+    ]
+    fake_graph = _FakeGraph(stream_chunks=chunks)
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    monkeypatch.setattr(service_module, "sandbox_toolset", _fake_sandbox_toolset)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    await service.run_fresh(make_issue(), uuid4())
+
+    assert repo.update_status_calls == [("octo/repo#42", RunStatus.PENDING_APPROVAL)]
+    assert repo.release_resume_lock_calls == ["octo/repo#42"]
+    assert repo.mark_failed_calls == []
+
+
+async def test_run_fresh_passes_a_deterministic_trace_id_to_create_initial_state(
+    monkeypatch: Any,
+) -> None:
+    fake_graph = _FakeGraph(stream_chunks=[])
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    monkeypatch.setattr(service_module, "sandbox_toolset", _fake_sandbox_toolset)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    await service.run_fresh(make_issue(), uuid4())
+
+    expected_trace_id = service_module.create_trace_id("octo/repo#42")
+    state = fake_graph.astream_inputs[0]
+    assert state["run_meta"].trace_id == expected_trace_id
+
+
+async def test_run_and_track_calls_build_callback_handler_with_no_trace_id(
+    monkeypatch: Any,
+) -> None:
+    """`root_span` is already open by the time the graph fires its first
+    callback, so `build_callback_handler` must nest under that ambient span
+    -- passing `trace_id` to both would produce two disconnected sibling
+    root spans sharing a trace_id instead of one nested trace (see
+    `observability.tracing.build_callback_handler`'s own docstring)."""
+    fake_graph = _FakeGraph(stream_chunks=[])
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    monkeypatch.setattr(service_module, "sandbox_toolset", _fake_sandbox_toolset)
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def _fake_build_callback_handler(*args: Any, **kwargs: Any) -> None:
+        calls.append((args, kwargs))
+        return None
+
+    monkeypatch.setattr(service_module, "build_callback_handler", _fake_build_callback_handler)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    await service.run_fresh(make_issue(), uuid4())
+
+    assert calls == [((), {})]
+
+
+async def test_run_fresh_marks_terminal_on_final_status(monkeypatch: Any) -> None:
+    chunks = [{"approval_queue": {"status": RunStatus.APPROVED_AND_POSTED}}]
+    fake_graph = _FakeGraph(stream_chunks=chunks)
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    monkeypatch.setattr(service_module, "sandbox_toolset", _fake_sandbox_toolset)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    await service.run_fresh(make_issue(), uuid4())
+
+    assert repo.mark_terminal_calls == [("octo/repo#42", RunStatus.APPROVED_AND_POSTED)]
+    assert repo.release_resume_lock_calls == ["octo/repo#42"]
+
+
+async def test_run_fresh_marks_failed_on_unexpected_exception_mid_stream(monkeypatch: Any) -> None:
+    fake_graph = _FakeGraph(raise_error=RuntimeError("boom"))
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    monkeypatch.setattr(service_module, "sandbox_toolset", _fake_sandbox_toolset)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    await service.run_fresh(make_issue(), uuid4())  # must not raise
+
+    assert repo.mark_failed_calls == [("octo/repo#42", "RuntimeError: boom")]
+    assert repo.release_resume_lock_calls == ["octo/repo#42"]
+
+
+async def test_run_fresh_marks_failed_when_record_missing_before_streaming(
+    monkeypatch: Any,
+) -> None:
+    """The try/except wraps setup (record lookup, sandbox entry, graph
+    build), not just the astream loop -- a failure here must be exactly as
+    visible as a failure mid-stream, since nobody is watching a background
+    task either way."""
+    fake_graph = _FakeGraph(stream_chunks=[])
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    monkeypatch.setattr(service_module, "sandbox_toolset", _fake_sandbox_toolset)
+    repo = _FakeRunsRepository(get_result=None)
+    service = make_service(repo=repo)
+
+    await service.run_fresh(make_issue(), uuid4())  # must not raise
+
+    assert len(repo.mark_failed_calls) == 1
+    assert repo.mark_failed_calls[0][0] == "octo/repo#42"
+    assert repo.release_resume_lock_calls == ["octo/repo#42"]
+    assert fake_graph.astream_inputs == []  # never got far enough to stream
+
+
+async def test_run_resume_passes_command_resume_to_astream(monkeypatch: Any) -> None:
+    chunks = [{"approval_queue": {"status": RunStatus.REJECTED}}]
+    fake_graph = _FakeGraph(stream_chunks=chunks)
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    monkeypatch.setattr(service_module, "sandbox_toolset", _fake_sandbox_toolset)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+    decision = ApprovalDecision(decisions=[ActionDecision(index=0, approved=False)])
+
+    await service.run_resume("octo/repo#42", decision)
+
+    assert isinstance(fake_graph.astream_inputs[0], Command)
+    assert repo.mark_terminal_calls == [("octo/repo#42", RunStatus.REJECTED)]
+    assert repo.release_resume_lock_calls == ["octo/repo#42"]
+
+
+async def test_run_resume_marks_failed_when_record_missing(monkeypatch: Any) -> None:
+    fake_graph = _FakeGraph(stream_chunks=[])
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    monkeypatch.setattr(service_module, "sandbox_toolset", _fake_sandbox_toolset)
+    repo = _FakeRunsRepository(get_result=None)
+    service = make_service(repo=repo)
+    decision = ApprovalDecision(decisions=[ActionDecision(index=0, approved=True)])
+
+    await service.run_resume("octo/repo#42", decision)  # must not raise
+
+    assert len(repo.mark_failed_calls) == 1
+    assert repo.release_resume_lock_calls == ["octo/repo#42"]

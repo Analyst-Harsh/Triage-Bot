@@ -8,8 +8,9 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 import graph.builder as builder_module
+import graph.checkpointer as checkpointer_module
 from graph.builder import build_graph
-from graph.checkpointer import sqlite_checkpointer
+from graph.checkpointer import postgres_checkpointer, sqlite_checkpointer
 from graph.nodes.node_names import NodeName
 from graph.nodes.risk_check import RiskCheckNode
 from graph.schemas import (
@@ -194,3 +195,30 @@ async def test_sqlite_checkpointer_serde_allows_full_schema_round_trip_without_w
 
     assert restored == state
     assert "unregistered type" not in caplog.text.lower()
+
+
+class _FakeAsyncPostgresSaver:
+    """Duck-typed stand-in for `AsyncPostgresSaver`: `postgres_checkpointer`
+    only ever constructs one (passing the pool and serde straight through)
+    and awaits `.setup()` before yielding it."""
+
+    def __init__(self, conn: object, *, serde: object = None) -> None:
+        self.conn = conn
+        self.serde = serde
+        self.setup_called = False
+
+    async def setup(self) -> None:
+        self.setup_called = True
+
+
+async def test_postgres_checkpointer_calls_setup_and_yields_saver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(checkpointer_module, "AsyncPostgresSaver", _FakeAsyncPostgresSaver)
+    fake_pool = object()
+
+    async with postgres_checkpointer(fake_pool) as saver:  # type: ignore[arg-type]
+        assert isinstance(saver, _FakeAsyncPostgresSaver)
+        assert saver.conn is fake_pool
+        assert saver.setup_called
+        assert saver.serde is not None

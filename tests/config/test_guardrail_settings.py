@@ -16,12 +16,16 @@ def test_guardrail_settings_defaults_match_audited_values() -> None:
     assert guardrails.structured_output_max_attempts == 2
     assert guardrails.default_max_iterations == 10
     assert guardrails.default_max_cost_usd == 1.0
+    assert guardrails.max_retry_attempts == 3
     assert guardrails.llm_request_timeout_seconds == 30.0
     assert guardrails.llm_max_retries == 2
     assert guardrails.e2b_sandbox_session_timeout_seconds == 900.0
     assert guardrails.e2b_install_timeout_seconds == 300.0
     assert guardrails.e2b_test_command_timeout_seconds == 180.0
     assert guardrails.e2b_max_billed_seconds_per_run == 600.0
+    assert guardrails.stale_run_threshold_minutes == 15.0
+    assert guardrails.stale_resume_threshold_minutes == 10.0
+    assert guardrails.max_webhook_body_bytes == 1024 * 1024
 
 
 def test_settings_guardrails_field_populated_with_defaults() -> None:
@@ -54,6 +58,8 @@ def test_settings_guardrails_overridden_via_nested_env_var(
         "structured_output_max_attempts",
         "default_max_iterations",
         "llm_max_retries",
+        "max_retry_attempts",
+        "max_webhook_body_bytes",
     ],
 )
 def test_guardrail_settings_rejects_zero_int_caps(field: str) -> None:
@@ -79,6 +85,8 @@ def test_guardrail_settings_rejects_zero_int_caps(field: str) -> None:
         "e2b_install_timeout_seconds",
         "e2b_test_command_timeout_seconds",
         "e2b_max_billed_seconds_per_run",
+        "stale_run_threshold_minutes",
+        "stale_resume_threshold_minutes",
     ],
 )
 def test_guardrail_settings_rejects_zero_float_budgets(field: str) -> None:

@@ -13,7 +13,7 @@ context manager `main.py` opens once and threads through `build_graph()` --
 `AsyncPostgresStore.from_conn_string()` is itself an async context manager,
 matching that shape directly.
 
-`Settings.episodic_memory_database_url` unset (the default) yields a
+`Settings.database_url` unset (the default) yields a
 `NullEpisodicMemoryStore` -- mirrors the Researcher's DocMind-optional
 degrade pattern: episodic memory is an enhancement, not a hard dependency.
 """
@@ -83,9 +83,9 @@ class BaseEpisodicMemoryStore(ABC):
 
 
 class NullEpisodicMemoryStore(BaseEpisodicMemoryStore):
-    """No-op stand-in used when `Settings.episodic_memory_database_url` is
-    unset, and as the test double for node tests that don't exercise
-    memory behavior directly."""
+    """No-op stand-in used when `Settings.database_url` is unset, and as
+    the test double for node tests that don't exercise memory behavior
+    directly."""
 
     async def find_similar(
         self,
@@ -227,7 +227,7 @@ async def episodic_memory_store(settings: Settings) -> AsyncGenerator[BaseEpisod
     Otherwise opens an `AsyncPostgresStore` (small connection pool, semantic
     search configured via `index`), runs its migrations, yields the real
     store, and closes the pool on exit."""
-    if settings.episodic_memory_database_url is None:
+    if settings.database_url is None:
         yield NullEpisodicMemoryStore()
         return
 
@@ -240,7 +240,7 @@ async def episodic_memory_store(settings: Settings) -> AsyncGenerator[BaseEpisod
     index_config = PostgresIndexConfig(dims=settings.embedding_dimensions, embed=embeddings)
 
     async with AsyncPostgresStore.from_conn_string(
-        settings.episodic_memory_database_url,
+        settings.database_url.get_secret_value(),
         pool_config=PoolConfig(min_size=1, max_size=5),
         index=index_config,
     ) as pg_store:

@@ -42,6 +42,15 @@ class RunStatus(StrEnum):
     REJECTED = "rejected"
     FAILED = "failed"
 
+    @classmethod
+    def terminal_statuses(cls) -> frozenset[RunStatus]:
+        """Every status a run can reach and never leave -- the single source
+        of truth both `TriageRunRepository` (claimable-terminal: safe to
+        reclaim) and `TriageRunService` (terminal-without-special-handling,
+        which excludes FAILED) derive their own explicitly-named subset
+        from, instead of each hand-copying a near-identical tuple."""
+        return frozenset({cls.AUTO_POSTED, cls.APPROVED_AND_POSTED, cls.REJECTED, cls.FAILED})
+
 
 class PostOutcome(StrEnum):
     POSTED = "posted"

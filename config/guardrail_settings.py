@@ -29,6 +29,12 @@ class GuardrailSettings(BaseModel):
     default_max_iterations: int = Field(default=10, ge=1)
     default_max_cost_usd: float = Field(default=1.0, gt=0.0)
 
+    # Retrying a FAILED run is a full restart (Planner/Researcher/Drafter
+    # all redo their work), not a resume -- this caps how many times a
+    # persistently-broken run can be retried before it needs a human to
+    # actually look at it instead of another automatic attempt.
+    max_retry_attempts: int = Field(default=3, ge=1)
+
     llm_request_timeout_seconds: float = Field(default=30.0, gt=0.0)
     llm_max_retries: int = Field(default=2, ge=1)
 
@@ -36,3 +42,17 @@ class GuardrailSettings(BaseModel):
     e2b_install_timeout_seconds: float = Field(default=300.0, gt=0.0)
     e2b_test_command_timeout_seconds: float = Field(default=180.0, gt=0.0)
     e2b_max_billed_seconds_per_run: float = Field(default=600.0, gt=0.0)
+
+    # Row claim/reclaim safety windows for `TriageRunRepository` -- how long
+    # a non-`pending_approval` row (stale_run) or a `resume_in_progress` lock
+    # (stale_resume) can go quiet before it's treated as an abandoned/crashed
+    # process rather than a legitimately slow step. See
+    # `repositories/triage_run_repository.py`'s `_claimable`/`claim_resume`.
+    stale_run_threshold_minutes: float = Field(default=15.0, gt=0.0)
+    stale_resume_threshold_minutes: float = Field(default=10.0, gt=0.0)
+
+    # Webhook body-size cap (`api/dependencies.py::verify_github_webhook_signature`)
+    # -- defense-in-depth against a cheaply-triggerable, pre-auth buffering
+    # cost. 1 MiB default: this bot only consumes `issues` events, far under
+    # GitHub's own 25 MB default delivery limit.
+    max_webhook_body_bytes: int = Field(default=1024 * 1024, ge=1)

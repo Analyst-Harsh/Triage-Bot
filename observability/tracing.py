@@ -68,8 +68,8 @@ def ensure_langfuse_client(settings: Settings) -> None:
     resolves to it automatically since it's the only client instantiated)
     if both `settings.langfuse_public_key`/`langfuse_secret_key` are set;
     otherwise does nothing; every other function in this module then stays a
-    no-op, exactly like the unset-`episodic_memory_database_url` case
-    degrades to `NullEpisodicMemoryStore`.
+    no-op, exactly like the unset-`database_url` case degrades to
+    `NullEpisodicMemoryStore`.
     """
     global _configured
     if _configured:

@@ -32,7 +32,9 @@ dependencies = [
     # deployment target requires it; not needed today.
     "psycopg[binary]>=3.2.0",
     "psycopg-pool>=3.2.0",
+    "sqlalchemy[asyncio]>=2.0.36",
     "structlog>=24.4.0",
+    "uvicorn[standard]>=0.34.0",
 ]
 
 [dependency-groups]
