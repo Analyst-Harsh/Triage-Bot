@@ -61,12 +61,20 @@ def create_initial_state(
     dry_run: bool = True,
     trace_id: str | None = None,
     run_id: UUID | None = None,
+    starting_cost_usd: float = 0.0,
 ) -> TriageState:
     """`run_id` lets a caller that already generated one (e.g.
     `services.triage_run_service.TriageRunService`, to keep
     `triage_runs.run_id` and `RunMeta.run_id` in sync) pass it in instead of
     getting a second, different random one. Omitting it (every existing
-    call site) still generates a fresh `uuid4()`, unchanged from before."""
+    call site) still generates a fresh `uuid4()`, unchanged from before.
+
+    `starting_cost_usd` lets a caller seed `RunMeta.estimated_cost_usd`
+    above zero -- `TriageRunService.run_fresh` passes the prior attempt's
+    persisted cost here for a retry, so cost keeps accumulating across
+    retries of the same thread_id rather than resetting. Every other call
+    site (a genuine fresh run, `main.py`, the eval harness) omits it and
+    gets today's unchanged `0.0` starting point."""
     thread_id = thread_id_for(issue.repo_full_name, issue.issue_number)
     return TriageState(
         issue=issue,
@@ -85,5 +93,6 @@ def create_initial_state(
             max_iterations=max_iterations,
             max_cost_usd=max_cost_usd,
             dry_run=dry_run,
+            estimated_cost_usd=starting_cost_usd,
         ),
     )

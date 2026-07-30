@@ -10,6 +10,8 @@ from pydantic import SecretStr
 
 from api.dependencies import get_run_service
 from api.routers.runs import router
+from api.schemas.run_detail_response import RunDetailResponse
+from api.schemas.run_summary import RunSummary
 from config.settings import Settings, get_settings
 from graph.schemas import (
     ActionType,
@@ -69,6 +71,7 @@ def make_record(**overrides: Any) -> TriageRunRecord:
         "retry_count": 0,
         "error_message": "boom",
         "dry_run": True,
+        "estimated_cost_usd": None,
         "started_at": now,
         "updated_at": now,
         "completed_at": now,
@@ -83,12 +86,14 @@ class _FakeService:
         *,
         pending_approval: ApprovalRequest | None = None,
         run: TriageRunRecord | None = None,
+        run_detail: RunDetailResponse | None = None,
         claim_resume_error: Exception | None = None,
         prepare_retry_result: tuple[Any, Any] | None = None,
         prepare_retry_error: Exception | None = None,
     ) -> None:
         self._pending_approval = pending_approval
         self._run = run
+        self._run_detail = run_detail
         self._claim_resume_error = claim_resume_error
         self._prepare_retry_result = prepare_retry_result
         self._prepare_retry_error = prepare_retry_error
@@ -100,6 +105,9 @@ class _FakeService:
 
     async def get_run(self, _thread_id: str) -> TriageRunRecord | None:
         return self._run
+
+    async def get_run_detail(self, _thread_id: str) -> RunDetailResponse | None:
+        return self._run_detail
 
     async def claim_resume(self, thread_id: str) -> None:  # noqa: ARG002
         if self._claim_resume_error is not None:
@@ -131,6 +139,50 @@ def make_app(service: Any) -> FastAPI:
     )
     app.dependency_overrides[get_run_service] = lambda: service
     return app
+
+
+def make_detail(**overrides: Any) -> RunDetailResponse:
+    defaults: dict[str, Any] = {
+        "run": RunSummary.from_record(make_record()),
+        "planner_output": None,
+        "research_findings": None,
+        "draft": None,
+        "risk_assessment": None,
+        "post_results": None,
+        "episodic_context": [],
+        "run_meta": None,
+    }
+    defaults.update(overrides)
+    return RunDetailResponse(**defaults)
+
+
+def test_get_run_detail_requires_bearer_token() -> None:
+    client = TestClient(make_app(_FakeService()))
+    response = get(client, "/runs/octo/repo/42")
+    assert response.status_code == 401
+
+
+def test_get_run_detail_returns_404_when_no_run() -> None:
+    service = _FakeService(run_detail=None)
+    client = TestClient(make_app(service))
+
+    response = get(client, "/runs/octo/repo/42", headers=AUTH_HEADERS)
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["detail"] == "no run found for this issue"
+
+
+def test_get_run_detail_returns_combined_detail() -> None:
+    service = _FakeService(run_detail=make_detail())
+    client = TestClient(make_app(service))
+
+    response = get(client, "/runs/octo/repo/42", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["run"]["thread_id"] == "octo/repo#42"
+    assert body["planner_output"] is None
+    assert body["episodic_context"] == []
 
 
 def test_get_resume_requires_bearer_token() -> None:

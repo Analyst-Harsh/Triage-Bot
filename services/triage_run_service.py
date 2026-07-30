@@ -23,10 +23,14 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
+from api.schemas.run_detail_response import RunDetailResponse
+from api.schemas.run_list_response import RunListResponse
+from api.schemas.run_summary import RunSummary
+from api.schemas.run_summary_response import RunSummaryResponse
 from config.settings import Settings
 from graph.builder import build_graph
 from graph.nodes.node_names import NodeName
-from graph.schemas import ApprovalDecision, ApprovalRequest, IssuePayload, RunStatus
+from graph.schemas import ApprovalDecision, ApprovalRequest, IssuePayload, IssueSource, RunStatus
 from graph.state import TriageState, TriageStateUpdate, create_initial_state, thread_id_for
 from observability.tracing import build_callback_handler, create_trace_id, root_span
 from repositories.triage_run_repository import TriageRunRepository
@@ -106,6 +110,66 @@ class TriageRunService:
     async def get_run(self, thread_id: str) -> TriageRunRecord | None:
         return await self._get_record(thread_id)
 
+    async def get_run_detail(self, thread_id: str) -> RunDetailResponse | None:
+        """Dashboard detail view: `TriageRunRecord` (fast, `triage_runs`-backed
+        metadata) plus the full pipeline detail read straight from the
+        checkpoint -- the same `graph.aget_state` pattern `get_pending_approval`
+        already established, since planner/research/draft/risk output only
+        ever lives in the checkpointed `TriageState`, never in `triage_runs`.
+        Pipeline fields are `None` only in the narrow window between a
+        webhook being accepted and the graph's first checkpoint superstep
+        landing."""
+        record = await self._get_record(thread_id)
+        if record is None:
+            return None
+        graph = build_graph(checkpointer=self._checkpointer)
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+        snapshot = await graph.aget_state(config)  # pyright: ignore[reportUnknownMemberType]
+        state = cast(TriageState, snapshot.values)
+        return RunDetailResponse(
+            run=RunSummary.from_record(record),
+            planner_output=state.get("planner_output"),
+            research_findings=state.get("research_findings"),
+            draft=state.get("draft"),
+            risk_assessment=state.get("risk_assessment"),
+            post_results=state.get("post_results"),
+            episodic_context=state.get("episodic_context", []),
+            run_meta=state.get("run_meta"),
+        )
+
+    async def list_runs(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        statuses: list[RunStatus] | None,
+        repo_full_name: str | None,
+        source: IssueSource | None,
+    ) -> RunListResponse:
+        offset = (page - 1) * page_size
+        total = await self._runs_repo.count_runs(
+            statuses=statuses, repo_full_name=repo_full_name, source=source
+        )
+        rows = await self._runs_repo.list_runs(
+            statuses=statuses,
+            repo_full_name=repo_full_name,
+            source=source,
+            offset=offset,
+            limit=page_size,
+        )
+        items = [RunSummary.from_record(TriageRunRecord.model_validate(row)) for row in rows]
+        total_pages = -(-total // page_size) if total > 0 else 0
+        return RunListResponse(
+            items=items, total=total, page=page, page_size=page_size, total_pages=total_pages
+        )
+
+    async def get_status_summary(self, *, repo_full_name: str | None = None) -> RunSummaryResponse:
+        counts = await self._runs_repo.count_by_status(repo_full_name=repo_full_name)
+        counts_by_status = {status: counts.get(status.value, 0) for status in RunStatus}
+        return RunSummaryResponse(
+            counts_by_status=counts_by_status, total_runs=sum(counts_by_status.values())
+        )
+
     async def get_pending_approval(self, thread_id: str) -> ApprovalRequest | None:
         """Reads the checkpointer directly -- the authoritative source for
         resume-vs-fresh, exactly as `main.py` does today (`graph.aget_state`,
@@ -170,6 +234,13 @@ class TriageRunService:
         `TriageState.status` is rather than inventing a finer-grained
         per-node projection the checkpointed state doesn't actually have.
 
+        Cost tracking is independent of that: any superstep carrying
+        `run_meta` (Researcher tool calls and Drafter iterations included,
+        neither of which sets `status`) persists `run_meta.estimated_cost_usd`
+        via `update_cost` even when there's no status change to report --
+        otherwise the dashboard's per-run cost figure would only update at
+        the handful of supersteps that also happen to change `status`.
+
         `graph.astream()`'s overloads resolve to a partially-Unknown type
         under strict pyright (the same library generics gap `main.py` and
         `tests/graph/test_builder.py` already work around with a `cast`) --
@@ -189,21 +260,34 @@ class TriageRunService:
                 if not isinstance(update, dict):
                     continue
                 typed_update = cast(TriageStateUpdate, update)
+                run_meta = typed_update.get("run_meta")
+                estimated_cost_usd = run_meta.estimated_cost_usd if run_meta is not None else None
                 status = typed_update.get("status")
                 if status is None:
+                    if estimated_cost_usd is not None:
+                        await self._runs_repo.update_cost(
+                            thread_id, estimated_cost_usd=estimated_cost_usd
+                        )
                     continue
                 if status == RunStatus.FAILED:
-                    run_meta = typed_update.get("run_meta")
                     error_message = (
                         run_meta.errors[-1].error_message
                         if run_meta is not None and run_meta.errors
                         else "unknown error"
                     )
-                    await self._runs_repo.mark_failed(thread_id, error_message=error_message)
+                    await self._runs_repo.mark_failed(
+                        thread_id,
+                        error_message=error_message,
+                        estimated_cost_usd=estimated_cost_usd,
+                    )
                 elif status in _TERMINAL_STATUSES:
-                    await self._runs_repo.mark_terminal(thread_id, status=status)
+                    await self._runs_repo.mark_terminal(
+                        thread_id, status=status, estimated_cost_usd=estimated_cost_usd
+                    )
                 else:
-                    await self._runs_repo.update_status(thread_id, status=status)
+                    await self._runs_repo.update_status(
+                        thread_id, status=status, estimated_cost_usd=estimated_cost_usd
+                    )
 
     async def _run_and_track(
         self,
@@ -283,7 +367,12 @@ class TriageRunService:
     async def run_fresh(self, issue: IssuePayload, run_id: UUID) -> None:
         """Background-task entry point for both the webhook and the retry
         path -- a retry is just a fresh run sourced from a different
-        caller."""
+        caller. `starting_cost_usd` is what makes that true for cost
+        specifically: `claim_fresh_run` nulls the column for a genuine
+        fresh run (so this seeds `0.0`, unchanged from before), while
+        `claim_retry` no longer nulls it for a retry (so this carries the
+        failed attempt's cost forward) -- the same code path, branching
+        only on what's already in the row."""
         thread_id = thread_id_for(issue.repo_full_name, issue.issue_number)
         await self._run_and_track(
             thread_id,
@@ -294,6 +383,9 @@ class TriageRunService:
                 dry_run=record.dry_run,
                 run_id=run_id,
                 trace_id=trace_id,
+                starting_cost_usd=(
+                    record.estimated_cost_usd if record.estimated_cost_usd is not None else 0.0
+                ),
             ),
         )
 

@@ -30,6 +30,7 @@ class TriageRunRecord(StrictBaseModel):
     retry_count: int
     error_message: str | None
     dry_run: bool
+    estimated_cost_usd: float | None
     started_at: datetime
     updated_at: datetime
     completed_at: datetime | None

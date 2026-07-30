@@ -40,6 +40,7 @@ class TriageRun(Base):
     retry_count: Mapped[int] = mapped_column(default=0)
     error_message: Mapped[str | None]
     dry_run: Mapped[bool] = mapped_column(default=True)
+    estimated_cost_usd: Mapped[float | None]
     started_at: Mapped[datetime]
     updated_at: Mapped[datetime]
     completed_at: Mapped[datetime | None]
