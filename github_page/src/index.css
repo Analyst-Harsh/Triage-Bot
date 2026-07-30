@@ -1,0 +1,152 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+
+  --color-bg: #0f172a;
+  --color-surface: #151b2e;
+  --color-surface-border: rgba(255, 255, 255, 0.14);
+  --color-primary: #7c3aed;
+  --color-secondary-from: #6366f1;
+  --color-secondary-to: #60a5fa;
+  --color-risk-low: #22c55e;
+  --color-risk-medium: #f59e0b;
+  --color-risk-high: #ef4444;
+  --color-text: #f8fafc;
+  --color-text-muted: #cbd5e1;
+}
+
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--color-primary);
+  color: white;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-secondary-to);
+  outline-offset: 2px;
+}
+
+@keyframes plan-check {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scan-sweep {
+  0% {
+    transform: translateY(-10%);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(110%);
+    opacity: 0;
+  }
+}
+
+@keyframes blink-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes hero-glow-drift {
+  0% {
+    transform: translate(-6%, -4%) scale(1);
+  }
+  50% {
+    transform: translate(6%, 4%) scale(1.18);
+  }
+  100% {
+    transform: translate(-6%, -4%) scale(1);
+  }
+}
+
+@keyframes arrow-color-cycle {
+  0%,
+  100% {
+    color: var(--color-primary);
+  }
+  33% {
+    color: var(--color-secondary-from);
+  }
+  66% {
+    color: var(--color-secondary-to);
+  }
+}
+
+@keyframes gauge-sweep {
+  0% {
+    transform: rotate(-58deg);
+  }
+  50% {
+    transform: rotate(58deg);
+  }
+  100% {
+    transform: rotate(-58deg);
+  }
+}
+
+@keyframes stage-text-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes accent-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-visual-motion {
+    animation: none !important;
+  }
+}
