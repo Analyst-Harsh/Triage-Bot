@@ -4,7 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 
 from api.dependencies import RunServiceDep, require_bearer_token
 from api.errors import to_http_exception
-from api.schemas import RetryRequest, RunAcceptedResponse
+from api.schemas import RetryRequest, RunAcceptedResponse, RunDetailResponse
 from graph.schemas import ApprovalDecision, ApprovalRequest, RunStatus
 from graph.state import thread_id_for
 from services.errors import (
@@ -70,6 +70,18 @@ class RunIdentity:
         if record is None:
             raise RunNotFoundError(self.thread_id)
         raise NothingPendingError(self.thread_id, record.status, record.error_message)
+
+
+@router.get("", response_model=RunDetailResponse)
+async def get_run_detail(
+    run: Annotated[RunIdentity, Depends()],
+    service: RunServiceDep,
+) -> RunDetailResponse:
+    detail = await service.get_run_detail(run.thread_id)
+    if detail is None:
+        exc = RunNotFoundError(run.thread_id)
+        raise to_http_exception(exc, detail="no run found for this issue") from exc
+    return detail
 
 
 @router.get("/resume", response_model=ApprovalRequest, name=GET_PENDING_APPROVAL_ROUTE_NAME)

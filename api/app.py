@@ -16,6 +16,7 @@ from datetime import timedelta
 from fastapi import FastAPI
 
 from api.routers.runs import router as runs_router
+from api.routers.runs_collection import router as runs_collection_router
 from api.routers.webhooks import router as webhooks_router
 from config.settings import get_settings
 from db.engine import session_factory, triage_run_engine
@@ -69,6 +70,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(title="Triage Bot API", lifespan=lifespan)
     app.include_router(webhooks_router)
+    app.include_router(runs_collection_router)
     app.include_router(runs_router)
     return app
 

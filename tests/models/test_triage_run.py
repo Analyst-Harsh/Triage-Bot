@@ -24,6 +24,7 @@ def test_triage_run_constructs_with_every_column() -> None:
         retry_count=0,
         error_message=None,
         dry_run=True,
+        estimated_cost_usd=None,
         started_at=now,
         updated_at=now,
         completed_at=None,
@@ -33,6 +34,7 @@ def test_triage_run_constructs_with_every_column() -> None:
     assert run.run_id == run_id
     assert run.status == "received"
     assert run.retry_count == 0
+    assert run.estimated_cost_usd is None
     assert run.completed_at is None
 
 

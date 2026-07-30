@@ -40,18 +40,28 @@ problem that exists yet.
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Update, and_, or_, update
+from sqlalchemy import ColumnElement, Update, and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.dml import ReturningInsert, ReturningUpdate
 
-from graph.schemas import IssuePayload, RunStatus
+from graph.schemas import IssuePayload, IssueSource, RunStatus
 from graph.state import thread_id_for
 from models.triage_run import TriageRun
 
 # Claimable-terminal: every terminal status, full stop -- a row in any of
 # these is safe to reclaim (see `_claimable`'s docstring below).
 _TERMINAL = tuple(status.value for status in RunStatus.terminal_statuses())
+
+
+def _with_cost(values: dict[str, object], estimated_cost_usd: float | None) -> dict[str, object]:
+    """Adds `estimated_cost_usd` to an update's `.values()` dict only when
+    a real figure is given -- omitting the key (rather than writing `None`)
+    means a superstep with no `run_meta` of its own never overwrites a cost
+    a previous superstep already persisted."""
+    if estimated_cost_usd is not None:
+        values["estimated_cost_usd"] = estimated_cost_usd
+    return values
 
 
 class TriageRunRepository:
@@ -124,6 +134,7 @@ class TriageRunRepository:
                 retry_count=0,
                 error_message=None,
                 dry_run=dry_run,
+                estimated_cost_usd=None,
                 started_at=now,
                 updated_at=now,
                 completed_at=None,
@@ -140,6 +151,7 @@ class TriageRunRepository:
                     "retry_count": 0,
                     "error_message": None,
                     "dry_run": dry_run,
+                    "estimated_cost_usd": None,
                     "updated_at": now,
                     "completed_at": None,
                 },
@@ -157,7 +169,15 @@ class TriageRunRepository:
         as the race-proof recheck -- specifically `status == FAILED`, not
         the broader `_claimable()` check `claim_fresh_run` uses, since a
         retry is only ever valid for a run that failed, not any terminal or
-        stale one)."""
+        stale one).
+
+        `estimated_cost_usd` is deliberately omitted from `.values()`
+        (rather than written as `None`, the way `claim_fresh_run` does) --
+        a retry should keep accumulating cost from the attempt that just
+        failed, not reset it. `TriageRunService.run_fresh` reads this same
+        carried-forward figure back off the freshly re-fetched record and
+        seeds the retried attempt's `RunMeta` with it via
+        `create_initial_state`'s `starting_cost_usd`."""
         now = datetime.now(UTC)
         stmt = (
             update(TriageRun)
@@ -210,46 +230,138 @@ class TriageRunRepository:
         )
         await self._execute(stmt)
 
-    async def update_status(self, thread_id: str, *, status: RunStatus) -> None:
+    async def update_status(
+        self, thread_id: str, *, status: RunStatus, estimated_cost_usd: float | None = None
+    ) -> None:
         """Called after every `astream` superstep that carries a `status`
         field in its update -- reflects exactly what `TriageState.status`
-        is, never a value the checkpointed state itself doesn't have."""
-        stmt = (
-            update(TriageRun)
-            .where(TriageRun.thread_id == thread_id)
-            .values(status=status.value, updated_at=datetime.now(UTC))
+        is, never a value the checkpointed state itself doesn't have.
+
+        `estimated_cost_usd` is `None` whenever the same superstep's update
+        didn't also carry a `run_meta` -- omitted from `.values()` in that
+        case (via `_with_cost`) rather than written as `NULL`, so a status
+        change alone never wipes out a cost figure a previous superstep
+        already persisted."""
+        values = _with_cost(
+            {"status": status.value, "updated_at": datetime.now(UTC)}, estimated_cost_usd
         )
+        stmt = update(TriageRun).where(TriageRun.thread_id == thread_id).values(**values)
         await self._execute(stmt)
 
-    async def mark_failed(self, thread_id: str, *, error_message: str) -> None:
+    async def mark_failed(
+        self, thread_id: str, *, error_message: str, estimated_cost_usd: float | None = None
+    ) -> None:
         now = datetime.now(UTC)
-        stmt = (
-            update(TriageRun)
-            .where(TriageRun.thread_id == thread_id)
-            .values(
-                status=RunStatus.FAILED.value,
-                error_message=error_message,
-                resume_in_progress=False,
-                updated_at=now,
-                completed_at=now,
-            )
+        values = _with_cost(
+            {
+                "status": RunStatus.FAILED.value,
+                "error_message": error_message,
+                "resume_in_progress": False,
+                "updated_at": now,
+                "completed_at": now,
+            },
+            estimated_cost_usd,
         )
+        stmt = update(TriageRun).where(TriageRun.thread_id == thread_id).values(**values)
         await self._execute(stmt)
 
-    async def mark_terminal(self, thread_id: str, *, status: RunStatus) -> None:
+    async def mark_terminal(
+        self, thread_id: str, *, status: RunStatus, estimated_cost_usd: float | None = None
+    ) -> None:
         now = datetime.now(UTC)
+        values = _with_cost(
+            {
+                "status": status.value,
+                "resume_in_progress": False,
+                "updated_at": now,
+                "completed_at": now,
+            },
+            estimated_cost_usd,
+        )
+        stmt = update(TriageRun).where(TriageRun.thread_id == thread_id).values(**values)
+        await self._execute(stmt)
+
+    async def update_cost(self, thread_id: str, *, estimated_cost_usd: float) -> None:
+        """Covers graph updates that carry `run_meta` but no `status`
+        change (e.g. a Researcher tool call or Drafter iteration) -- the
+        status-bearing methods above persist cost themselves when a status
+        change happens in the same superstep, so this is only for the
+        in-between chunks."""
         stmt = (
             update(TriageRun)
             .where(TriageRun.thread_id == thread_id)
-            .values(
-                status=status.value,
-                resume_in_progress=False,
-                updated_at=now,
-                completed_at=now,
-            )
+            .values(estimated_cost_usd=estimated_cost_usd, updated_at=datetime.now(UTC))
         )
         await self._execute(stmt)
 
     async def get(self, thread_id: str) -> TriageRun | None:
         async with self._session_factory() as session:
             return await session.get(TriageRun, thread_id)
+
+    def _list_filters(
+        self,
+        *,
+        statuses: list[RunStatus] | None,
+        repo_full_name: str | None,
+        source: IssueSource | None,
+    ) -> ColumnElement[bool]:
+        """Shared WHERE-clause construction for `list_runs`/`count_runs` --
+        both must filter identically or a page's `total` could disagree
+        with the rows actually returned for it."""
+        conditions: list[ColumnElement[bool]] = []
+        if statuses is not None:
+            conditions.append(TriageRun.status.in_([status.value for status in statuses]))
+        if repo_full_name is not None:
+            conditions.append(TriageRun.repo_full_name == repo_full_name)
+        if source is not None:
+            conditions.append(TriageRun.source == source.value)
+        return and_(*conditions) if conditions else and_(True)
+
+    async def count_runs(
+        self,
+        *,
+        statuses: list[RunStatus] | None,
+        repo_full_name: str | None,
+        source: IssueSource | None,
+    ) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(TriageRun)
+            .where(
+                self._list_filters(statuses=statuses, repo_full_name=repo_full_name, source=source)
+            )
+        )
+        async with self._session_factory() as session:
+            return (await session.execute(stmt)).scalar_one()
+
+    async def list_runs(
+        self,
+        *,
+        statuses: list[RunStatus] | None,
+        repo_full_name: str | None,
+        source: IssueSource | None,
+        offset: int,
+        limit: int,
+    ) -> list[TriageRun]:
+        stmt = (
+            select(TriageRun)
+            .where(
+                self._list_filters(statuses=statuses, repo_full_name=repo_full_name, source=source)
+            )
+            .order_by(TriageRun.updated_at.desc(), TriageRun.thread_id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        async with self._session_factory() as session:
+            return list((await session.execute(stmt)).scalars().all())
+
+    async def count_by_status(self, *, repo_full_name: str | None = None) -> dict[str, int]:
+        stmt = select(TriageRun.status, func.count()).group_by(TriageRun.status)
+        if repo_full_name is not None:
+            stmt = stmt.where(TriageRun.repo_full_name == repo_full_name)
+        async with self._session_factory() as session:
+            rows = (await session.execute(stmt)).all()
+        # dict(rows) trips pyright here -- SQLAlchemy's Row[tuple[str, int]]
+        # isn't recognized as assignable to dict()'s Iterable[tuple[_KT, _VT]]
+        # overload, so the comprehension form is kept despite ruff's C416.
+        return {status: count for status, count in rows}  # noqa: C416

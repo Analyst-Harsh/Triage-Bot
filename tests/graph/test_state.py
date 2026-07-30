@@ -176,6 +176,22 @@ def test_create_initial_state_defaults_trace_id_to_none() -> None:
     assert state["run_meta"].trace_id is None
 
 
+def test_create_initial_state_seeds_cost_from_starting_cost_usd() -> None:
+    issue = make_issue()
+
+    state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0, starting_cost_usd=0.42)
+
+    assert state["run_meta"].estimated_cost_usd == 0.42
+
+
+def test_create_initial_state_defaults_starting_cost_usd_to_zero() -> None:
+    issue = make_issue()
+
+    state = create_initial_state(issue, max_iterations=10, max_cost_usd=1.0)
+
+    assert state["run_meta"].estimated_cost_usd == 0.0
+
+
 def test_thread_id_for_formats_repo_hash_issue_number() -> None:
     assert thread_id_for("octo/repo", 42) == "octo/repo#42"
 

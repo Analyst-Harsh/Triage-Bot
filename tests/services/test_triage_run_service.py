@@ -20,6 +20,7 @@ from graph.schemas import (
     IssuePayload,
     IssueSource,
     RiskLevel,
+    RunMeta,
     RunStatus,
 )
 from graph.schemas.approval_decision import ActionDecision
@@ -67,12 +68,25 @@ def make_record(**overrides: Any) -> TriageRunRecord:
         "retry_count": 0,
         "error_message": "boom",
         "dry_run": True,
+        "estimated_cost_usd": None,
         "started_at": now,
         "updated_at": now,
         "completed_at": now,
     }
     defaults.update(overrides)
     return TriageRunRecord(**defaults)
+
+
+def make_run_meta(**overrides: Any) -> RunMeta:
+    defaults: dict[str, Any] = {
+        "run_id": uuid4(),
+        "thread_id": "octo/repo#42",
+        "started_at": datetime.now(UTC),
+        "max_iterations": 10,
+        "max_cost_usd": 1.0,
+    }
+    defaults.update(overrides)
+    return RunMeta(**defaults)
 
 
 def make_request(**overrides: Any) -> ApprovalRequest:
@@ -105,18 +119,28 @@ class _FakeRunsRepository:
         claim_retry_result: Any = "unset",
         claim_resume_result: Any = "unset",
         get_result: Any = None,
+        list_runs_result: list[Any] | None = None,
+        count_runs_result: int = 0,
+        count_by_status_result: dict[str, int] | None = None,
     ) -> None:
         self._claim_fresh_result = claim_fresh_result
         self._claim_retry_result = claim_retry_result
         self._claim_resume_result = claim_resume_result
         self._get_result = get_result
+        self._list_runs_result: list[Any] = list_runs_result or []
+        self._count_runs_result = count_runs_result
+        self._count_by_status_result = count_by_status_result or {}
         self.claim_fresh_calls: list[dict[str, Any]] = []
         self.claim_retry_calls: list[dict[str, Any]] = []
         self.claim_resume_calls: list[str] = []
         self.release_resume_lock_calls: list[str] = []
-        self.update_status_calls: list[tuple[str, RunStatus]] = []
-        self.mark_failed_calls: list[tuple[str, str]] = []
-        self.mark_terminal_calls: list[tuple[str, RunStatus]] = []
+        self.update_status_calls: list[tuple[str, RunStatus, float | None]] = []
+        self.mark_failed_calls: list[tuple[str, str, float | None]] = []
+        self.mark_terminal_calls: list[tuple[str, RunStatus, float | None]] = []
+        self.update_cost_calls: list[tuple[str, float]] = []
+        self.list_runs_calls: list[dict[str, Any]] = []
+        self.count_runs_calls: list[dict[str, Any]] = []
+        self.count_by_status_calls: list[str | None] = []
 
     async def claim_fresh_run(self, issue: IssuePayload, *, run_id: UUID, dry_run: bool) -> Any:
         self.claim_fresh_calls.append({"issue": issue, "run_id": run_id, "dry_run": dry_run})
@@ -135,17 +159,38 @@ class _FakeRunsRepository:
     async def release_resume_lock(self, thread_id: str) -> None:
         self.release_resume_lock_calls.append(thread_id)
 
-    async def update_status(self, thread_id: str, *, status: RunStatus) -> None:
-        self.update_status_calls.append((thread_id, status))
+    async def update_status(
+        self, thread_id: str, *, status: RunStatus, estimated_cost_usd: float | None = None
+    ) -> None:
+        self.update_status_calls.append((thread_id, status, estimated_cost_usd))
 
-    async def mark_failed(self, thread_id: str, *, error_message: str) -> None:
-        self.mark_failed_calls.append((thread_id, error_message))
+    async def mark_failed(
+        self, thread_id: str, *, error_message: str, estimated_cost_usd: float | None = None
+    ) -> None:
+        self.mark_failed_calls.append((thread_id, error_message, estimated_cost_usd))
 
-    async def mark_terminal(self, thread_id: str, *, status: RunStatus) -> None:
-        self.mark_terminal_calls.append((thread_id, status))
+    async def mark_terminal(
+        self, thread_id: str, *, status: RunStatus, estimated_cost_usd: float | None = None
+    ) -> None:
+        self.mark_terminal_calls.append((thread_id, status, estimated_cost_usd))
+
+    async def update_cost(self, thread_id: str, *, estimated_cost_usd: float) -> None:
+        self.update_cost_calls.append((thread_id, estimated_cost_usd))
 
     async def get(self, thread_id: str) -> Any:  # noqa: ARG002
         return self._get_result
+
+    async def list_runs(self, **kwargs: Any) -> list[Any]:
+        self.list_runs_calls.append(kwargs)
+        return self._list_runs_result
+
+    async def count_runs(self, **kwargs: Any) -> int:
+        self.count_runs_calls.append(kwargs)
+        return self._count_runs_result
+
+    async def count_by_status(self, *, repo_full_name: str | None = None) -> dict[str, int]:
+        self.count_by_status_calls.append(repo_full_name)
+        return self._count_by_status_result
 
 
 class _FakeGitHubClient(GitHubClient):
@@ -183,9 +228,15 @@ class _FakeSettings:
 
 
 class _FakeSnapshot:
-    def __init__(self, next_: tuple[Any, ...], interrupt_value: object = None) -> None:
+    def __init__(
+        self,
+        next_: tuple[Any, ...],
+        interrupt_value: object = None,
+        values: dict[str, Any] | None = None,
+    ) -> None:
         self.next = next_
         self.interrupts = [_FakeInterrupt(interrupt_value)] if interrupt_value is not None else []
+        self.values = values or {}
 
 
 class _FakeInterrupt:
@@ -486,7 +537,7 @@ async def test_run_fresh_streams_status_updates_and_releases_lock(monkeypatch: A
 
     await service.run_fresh(make_issue(), uuid4())
 
-    assert repo.update_status_calls == [("octo/repo#42", RunStatus.PENDING_APPROVAL)]
+    assert repo.update_status_calls == [("octo/repo#42", RunStatus.PENDING_APPROVAL, None)]
     assert repo.release_resume_lock_calls == ["octo/repo#42"]
     assert repo.mark_failed_calls == []
 
@@ -505,6 +556,41 @@ async def test_run_fresh_passes_a_deterministic_trace_id_to_create_initial_state
     expected_trace_id = service_module.create_trace_id("octo/repo#42")
     state = fake_graph.astream_inputs[0]
     assert state["run_meta"].trace_id == expected_trace_id
+
+
+async def test_run_fresh_seeds_starting_cost_from_the_record(monkeypatch: Any) -> None:
+    """A retried run must carry forward whatever the failed attempt already
+    spent -- `claim_retry` (repositories/triage_run_repository.py) no
+    longer nulls `estimated_cost_usd`, so the record `run_fresh` re-fetches
+    right after the claim already has the prior figure on it."""
+    fake_graph = _FakeGraph(stream_chunks=[])
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    monkeypatch.setattr(service_module, "sandbox_toolset", _fake_sandbox_toolset)
+    repo = _FakeRunsRepository(get_result=make_record(estimated_cost_usd=0.37))
+    service = make_service(repo=repo)
+
+    await service.run_fresh(make_issue(), uuid4())
+
+    state = fake_graph.astream_inputs[0]
+    assert state["run_meta"].estimated_cost_usd == 0.37
+
+
+async def test_run_fresh_defaults_starting_cost_to_zero_when_record_has_none(
+    monkeypatch: Any,
+) -> None:
+    """A genuinely fresh run's record has `estimated_cost_usd=None`
+    (`claim_fresh_run` still nulls it) -- must seed `0.0`, not `None` or a
+    crash."""
+    fake_graph = _FakeGraph(stream_chunks=[])
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    monkeypatch.setattr(service_module, "sandbox_toolset", _fake_sandbox_toolset)
+    repo = _FakeRunsRepository(get_result=make_record(estimated_cost_usd=None))
+    service = make_service(repo=repo)
+
+    await service.run_fresh(make_issue(), uuid4())
+
+    state = fake_graph.astream_inputs[0]
+    assert state["run_meta"].estimated_cost_usd == 0.0
 
 
 async def test_run_and_track_calls_build_callback_handler_with_no_trace_id(
@@ -543,7 +629,7 @@ async def test_run_fresh_marks_terminal_on_final_status(monkeypatch: Any) -> Non
 
     await service.run_fresh(make_issue(), uuid4())
 
-    assert repo.mark_terminal_calls == [("octo/repo#42", RunStatus.APPROVED_AND_POSTED)]
+    assert repo.mark_terminal_calls == [("octo/repo#42", RunStatus.APPROVED_AND_POSTED, None)]
     assert repo.release_resume_lock_calls == ["octo/repo#42"]
 
 
@@ -556,7 +642,7 @@ async def test_run_fresh_marks_failed_on_unexpected_exception_mid_stream(monkeyp
 
     await service.run_fresh(make_issue(), uuid4())  # must not raise
 
-    assert repo.mark_failed_calls == [("octo/repo#42", "RuntimeError: boom")]
+    assert repo.mark_failed_calls == [("octo/repo#42", "RuntimeError: boom", None)]
     assert repo.release_resume_lock_calls == ["octo/repo#42"]
 
 
@@ -593,7 +679,7 @@ async def test_run_resume_passes_command_resume_to_astream(monkeypatch: Any) -> 
     await service.run_resume("octo/repo#42", decision)
 
     assert isinstance(fake_graph.astream_inputs[0], Command)
-    assert repo.mark_terminal_calls == [("octo/repo#42", RunStatus.REJECTED)]
+    assert repo.mark_terminal_calls == [("octo/repo#42", RunStatus.REJECTED, None)]
     assert repo.release_resume_lock_calls == ["octo/repo#42"]
 
 
@@ -609,3 +695,133 @@ async def test_run_resume_marks_failed_when_record_missing(monkeypatch: Any) -> 
 
     assert len(repo.mark_failed_calls) == 1
     assert repo.release_resume_lock_calls == ["octo/repo#42"]
+
+
+# --- _drive cost persistence --------------------------------------------------
+
+
+async def test_run_fresh_persists_cost_without_a_status_change(monkeypatch: Any) -> None:
+    """A chunk carrying `run_meta` but no `status` (e.g. a Researcher tool
+    call) must still persist cost -- `update_cost` is the only repository
+    call that can do that, since `update_status`/`mark_terminal`/`mark_failed`
+    all require a status change to fire at all."""
+    run_meta = make_run_meta().with_usage(cost_usd=0.05)
+    chunks: list[dict[str, Any]] = [{"researcher": {"run_meta": run_meta}}]
+    fake_graph = _FakeGraph(stream_chunks=chunks)
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    monkeypatch.setattr(service_module, "sandbox_toolset", _fake_sandbox_toolset)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    await service.run_fresh(make_issue(), uuid4())
+
+    assert repo.update_cost_calls == [("octo/repo#42", 0.05)]
+    assert repo.update_status_calls == []
+    assert repo.mark_terminal_calls == []
+    assert repo.mark_failed_calls == []
+
+
+async def test_run_fresh_persists_cost_alongside_a_status_change(monkeypatch: Any) -> None:
+    """A chunk carrying both `run_meta` and `status` must pass the cost
+    through to the status-bearing repository call rather than also (or
+    instead) calling `update_cost` -- one write per superstep, not two."""
+    run_meta = make_run_meta().with_usage(cost_usd=0.12)
+    chunks: list[dict[str, Any]] = [
+        {"auto_post": {"status": RunStatus.PENDING_APPROVAL, "run_meta": run_meta}}
+    ]
+    fake_graph = _FakeGraph(stream_chunks=chunks)
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    monkeypatch.setattr(service_module, "sandbox_toolset", _fake_sandbox_toolset)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    await service.run_fresh(make_issue(), uuid4())
+
+    assert repo.update_status_calls == [("octo/repo#42", RunStatus.PENDING_APPROVAL, 0.12)]
+    assert repo.update_cost_calls == []
+
+
+# --- get_run_detail ------------------------------------------------------------
+
+
+async def test_get_run_detail_returns_none_when_no_run() -> None:
+    repo = _FakeRunsRepository(get_result=None)
+    service = make_service(repo=repo)
+
+    assert await service.get_run_detail("octo/repo#42") is None
+
+
+async def test_get_run_detail_combines_record_and_checkpoint_state(monkeypatch: Any) -> None:
+    record = make_record(status=RunStatus.DRAFTING, error_message=None)
+    run_meta = make_run_meta().with_usage(cost_usd=0.2)
+    fake_graph = _FakeGraph(
+        snapshot=_FakeSnapshot(next_=(), values={"run_meta": run_meta, "episodic_context": []})
+    )
+    monkeypatch.setattr(service_module, "build_graph", _graph_factory(fake_graph))
+    repo = _FakeRunsRepository(get_result=record)
+    service = make_service(repo=repo)
+
+    detail = await service.get_run_detail("octo/repo#42")
+
+    assert detail is not None
+    assert detail.run.thread_id == "octo/repo#42"
+    assert detail.run_meta is run_meta
+    assert detail.planner_output is None
+    assert detail.episodic_context == []
+
+
+# --- list_runs -----------------------------------------------------------------
+
+
+async def test_list_runs_computes_offset_and_total_pages() -> None:
+    repo = _FakeRunsRepository(
+        list_runs_result=[make_record(), make_record()], count_runs_result=45
+    )
+    service = make_service(repo=repo)
+
+    response = await service.list_runs(
+        page=3, page_size=20, statuses=None, repo_full_name=None, source=None
+    )
+
+    assert repo.list_runs_calls == [
+        {
+            "statuses": None,
+            "repo_full_name": None,
+            "source": None,
+            "offset": 40,
+            "limit": 20,
+        }
+    ]
+    assert response.total == 45
+    assert response.page == 3
+    assert response.page_size == 20
+    assert response.total_pages == 3
+    assert len(response.items) == 2
+
+
+async def test_list_runs_returns_zero_total_pages_when_empty() -> None:
+    repo = _FakeRunsRepository(list_runs_result=[], count_runs_result=0)
+    service = make_service(repo=repo)
+
+    response = await service.list_runs(
+        page=1, page_size=20, statuses=None, repo_full_name=None, source=None
+    )
+
+    assert response.total_pages == 0
+    assert response.items == []
+
+
+# --- get_status_summary ---------------------------------------------------------
+
+
+async def test_get_status_summary_zero_fills_every_status() -> None:
+    repo = _FakeRunsRepository(count_by_status_result={"failed": 3, "pending_approval": 2})
+    service = make_service(repo=repo)
+
+    response = await service.get_status_summary()
+
+    assert response.counts_by_status[RunStatus.FAILED] == 3
+    assert response.counts_by_status[RunStatus.PENDING_APPROVAL] == 2
+    assert response.counts_by_status[RunStatus.RECEIVED] == 0
+    assert response.total_runs == 5
+    assert set(response.counts_by_status) == set(RunStatus)
