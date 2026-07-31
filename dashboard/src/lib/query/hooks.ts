@@ -51,11 +51,18 @@ export function useRunsSummaryQuery(period: string | undefined, repoFullName?: s
 
 /** Sidebar SystemHealthPanel: deliberately period-independent (all-time) --
  * see the plan's own note on why this must not share the Overview page's
- * period selector. */
-export function useLiveHealthSummaryQuery() {
+ * period selector. `initialData` is threaded explicitly from the Server
+ * Component's own prefetch (`page.tsx` reads it back off the same
+ * `queryClient.prefetchQuery` call via `getQueryData`) rather than relying
+ * solely on `HydrationBoundary`'s cross-tree hydration timing for this one
+ * query -- `Sidebar` sits in a different branch of the tree than the rest
+ * of the Overview content, and `initialData` is the simpler, more direct
+ * guarantee that first paint has real data regardless of that boundary. */
+export function useLiveHealthSummaryQuery(initialData?: RunSummaryResponse) {
   return useQuery({
     queryKey: queryKeys.liveHealthSummary(),
     queryFn: () => fetchJson<RunSummaryResponse>("/api/runs/summary"),
+    initialData,
     refetchInterval: 10_000,
     refetchIntervalInBackground: false,
   });
