@@ -14,7 +14,7 @@ from api.schemas.run_list_response import RunListResponse
 from api.schemas.run_summary import RunSummary
 from api.schemas.run_summary_response import RunSummaryResponse
 from config.settings import Settings, get_settings
-from graph.schemas import IssueSource, RunStatus
+from graph.schemas import IssueSource, RunStatus, TimeRangePeriod
 from services.triage_run_record import TriageRunRecord
 from tests.api._http import get
 
@@ -127,7 +127,7 @@ def test_list_runs_passes_filters_and_pagination_through() -> None:
     response = get(
         client,
         "/runs?status=failed&status=pending_approval&repo_full_name=octo/repo"
-        "&source=webhook&page=2&page_size=10",
+        "&source=webhook&period=24h&page=2&page_size=10",
         headers=AUTH_HEADERS,
     )
 
@@ -139,6 +139,7 @@ def test_list_runs_passes_filters_and_pagination_through() -> None:
             "statuses": [RunStatus.FAILED, RunStatus.PENDING_APPROVAL],
             "repo_full_name": "octo/repo",
             "source": IssueSource.WEBHOOK,
+            "period": TimeRangePeriod.TWENTY_FOUR_HOURS,
         }
     ]
 
@@ -156,8 +157,18 @@ def test_list_runs_defaults_page_and_page_size() -> None:
             "statuses": None,
             "repo_full_name": None,
             "source": None,
+            "period": None,
         }
     ]
+
+
+def test_list_runs_rejects_invalid_period_value() -> None:
+    service = _FakeService(list_runs_result=make_list_response())
+    client = TestClient(make_app(service))
+
+    response = get(client, "/runs?period=90d", headers=AUTH_HEADERS)
+
+    assert response.status_code == 422
 
 
 def test_list_runs_rejects_page_size_above_cap() -> None:

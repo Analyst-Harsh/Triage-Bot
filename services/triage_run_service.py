@@ -30,7 +30,14 @@ from api.schemas.run_summary_response import RunSummaryResponse
 from config.settings import Settings
 from graph.builder import build_graph
 from graph.nodes.node_names import NodeName
-from graph.schemas import ApprovalDecision, ApprovalRequest, IssuePayload, IssueSource, RunStatus
+from graph.schemas import (
+    ApprovalDecision,
+    ApprovalRequest,
+    IssuePayload,
+    IssueSource,
+    RunStatus,
+    TimeRangePeriod,
+)
 from graph.state import TriageState, TriageStateUpdate, create_initial_state, thread_id_for
 from observability.tracing import build_callback_handler, create_trace_id, root_span
 from repositories.triage_run_repository import TriageRunRepository
@@ -42,6 +49,7 @@ from services.errors import (
     RunNotFailedError,
     RunNotFoundError,
 )
+from services.time_range_resolver import TimeRangeResolver
 from services.triage_run_record import TriageRunRecord
 from tools.sandbox import sandbox_toolset
 from utils.episodic_memory_store import BaseEpisodicMemoryStore
@@ -145,15 +153,21 @@ class TriageRunService:
         statuses: list[RunStatus] | None,
         repo_full_name: str | None,
         source: IssueSource | None,
+        period: TimeRangePeriod | None,
     ) -> RunListResponse:
         offset = (page - 1) * page_size
+        started_after = TimeRangeResolver().since(period)
         total = await self._runs_repo.count_runs(
-            statuses=statuses, repo_full_name=repo_full_name, source=source
+            statuses=statuses,
+            repo_full_name=repo_full_name,
+            source=source,
+            started_after=started_after,
         )
         rows = await self._runs_repo.list_runs(
             statuses=statuses,
             repo_full_name=repo_full_name,
             source=source,
+            started_after=started_after,
             offset=offset,
             limit=page_size,
         )

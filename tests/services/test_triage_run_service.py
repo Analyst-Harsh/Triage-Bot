@@ -22,6 +22,7 @@ from graph.schemas import (
     RiskLevel,
     RunMeta,
     RunStatus,
+    TimeRangePeriod,
 )
 from graph.schemas.approval_decision import ActionDecision
 from graph.schemas.approval_request import QueuedActionSummary
@@ -33,6 +34,7 @@ from services.errors import (
     RunNotFailedError,
     RunNotFoundError,
 )
+from services.time_range_resolver import TimeRangeResolver
 from services.triage_run_record import TriageRunRecord
 from services.triage_run_service import TriageRunService, validate_decision_matches
 from utils.github_client import GitHubClient
@@ -780,7 +782,7 @@ async def test_list_runs_computes_offset_and_total_pages() -> None:
     service = make_service(repo=repo)
 
     response = await service.list_runs(
-        page=3, page_size=20, statuses=None, repo_full_name=None, source=None
+        page=3, page_size=20, statuses=None, repo_full_name=None, source=None, period=None
     )
 
     assert repo.list_runs_calls == [
@@ -788,6 +790,7 @@ async def test_list_runs_computes_offset_and_total_pages() -> None:
             "statuses": None,
             "repo_full_name": None,
             "source": None,
+            "started_after": None,
             "offset": 40,
             "limit": 20,
         }
@@ -804,11 +807,39 @@ async def test_list_runs_returns_zero_total_pages_when_empty() -> None:
     service = make_service(repo=repo)
 
     response = await service.list_runs(
-        page=1, page_size=20, statuses=None, repo_full_name=None, source=None
+        page=1, page_size=20, statuses=None, repo_full_name=None, source=None, period=None
     )
 
     assert response.total_pages == 0
     assert response.items == []
+
+
+async def test_list_runs_converts_period_to_started_after_via_time_range_resolver(
+    monkeypatch: Any,
+) -> None:
+    """`period` must be resolved through `TimeRangeResolver.since` and the
+    result threaded down as `started_after` -- not passed to the repository
+    as-is, and not resolved by some ad-hoc inline computation."""
+    frozen_since = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def _fake_since(_self: TimeRangeResolver, _period: TimeRangePeriod | None) -> datetime:
+        return frozen_since
+
+    monkeypatch.setattr(service_module.TimeRangeResolver, "since", _fake_since)
+    repo = _FakeRunsRepository(list_runs_result=[], count_runs_result=0)
+    service = make_service(repo=repo)
+
+    await service.list_runs(
+        page=1,
+        page_size=20,
+        statuses=None,
+        repo_full_name=None,
+        source=None,
+        period=TimeRangePeriod.ONE_HOUR,
+    )
+
+    assert repo.list_runs_calls[0]["started_after"] == frozen_since
+    assert repo.count_runs_calls[0]["started_after"] == frozen_since
 
 
 # --- get_status_summary ---------------------------------------------------------

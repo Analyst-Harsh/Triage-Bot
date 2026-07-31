@@ -440,6 +440,7 @@ async def test_list_runs_applies_status_repo_and_source_filters() -> None:
         statuses=[RunStatus.FAILED, RunStatus.PENDING_APPROVAL],
         repo_full_name="octo/repo",
         source=IssueSource.WEBHOOK,
+        started_after=None,
         offset=0,
         limit=20,
     )
@@ -458,7 +459,12 @@ async def test_list_runs_with_no_filters_returns_all_rows() -> None:
     repo = make_repo(session)
 
     result = await repo.list_runs(
-        statuses=None, repo_full_name=None, source=None, offset=0, limit=20
+        statuses=None,
+        repo_full_name=None,
+        source=None,
+        started_after=None,
+        offset=0,
+        limit=20,
     )
 
     assert result == rows
@@ -468,10 +474,53 @@ async def test_list_runs_applies_offset_for_pagination() -> None:
     session = _FakeAsyncSession(scalars_rows=[])
     repo = make_repo(session)
 
-    await repo.list_runs(statuses=None, repo_full_name=None, source=None, offset=40, limit=20)
+    await repo.list_runs(
+        statuses=None,
+        repo_full_name=None,
+        source=None,
+        started_after=None,
+        offset=40,
+        limit=20,
+    )
 
     sql = compiled(session.executed[0][0])
     assert "OFFSET 40" in sql
+
+
+async def test_list_runs_applies_started_after_filter_when_given() -> None:
+    started_after = datetime(2026, 1, 1, tzinfo=UTC)
+    session = _FakeAsyncSession(scalars_rows=[])
+    repo = make_repo(session)
+
+    await repo.list_runs(
+        statuses=None,
+        repo_full_name=None,
+        source=None,
+        started_after=started_after,
+        offset=0,
+        limit=20,
+    )
+
+    sql = compiled(session.executed[0][0])
+    assert "triage_runs.started_at >=" in sql
+    assert str(started_after) in sql
+
+
+async def test_list_runs_omits_started_at_condition_when_started_after_is_none() -> None:
+    session = _FakeAsyncSession(scalars_rows=[])
+    repo = make_repo(session)
+
+    await repo.list_runs(
+        statuses=None,
+        repo_full_name=None,
+        source=None,
+        started_after=None,
+        offset=0,
+        limit=20,
+    )
+
+    sql = compiled(session.executed[0][0])
+    assert "started_at >=" not in sql
 
 
 async def test_count_runs_applies_same_filters_as_list_runs() -> None:
@@ -479,13 +528,34 @@ async def test_count_runs_applies_same_filters_as_list_runs() -> None:
     repo = make_repo(session)
 
     result = await repo.count_runs(
-        statuses=[RunStatus.FAILED], repo_full_name="octo/repo", source=None
+        statuses=[RunStatus.FAILED],
+        repo_full_name="octo/repo",
+        source=None,
+        started_after=None,
     )
 
     assert result == 7
     sql = compiled(session.executed[0][0])
     assert "failed" in sql
     assert "octo/repo" in sql
+
+
+async def test_count_runs_applies_started_after_filter_when_given() -> None:
+    started_after = datetime(2026, 1, 1, tzinfo=UTC)
+    session = _FakeAsyncSession(scalar_result=3)
+    repo = make_repo(session)
+
+    result = await repo.count_runs(
+        statuses=None,
+        repo_full_name=None,
+        source=None,
+        started_after=started_after,
+    )
+
+    assert result == 3
+    sql = compiled(session.executed[0][0])
+    assert "triage_runs.started_at >=" in sql
+    assert str(started_after) in sql
 
 
 async def test_count_by_status_groups_by_status() -> None:

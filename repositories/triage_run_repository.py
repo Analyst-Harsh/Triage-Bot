@@ -304,10 +304,17 @@ class TriageRunRepository:
         statuses: list[RunStatus] | None,
         repo_full_name: str | None,
         source: IssueSource | None,
+        started_after: datetime | None,
     ) -> ColumnElement[bool]:
         """Shared WHERE-clause construction for `list_runs`/`count_runs` --
         both must filter identically or a page's `total` could disagree
-        with the rows actually returned for it."""
+        with the rows actually returned for it.
+
+        `started_after` filters on `started_at`, not `updated_at` -- a
+        retried run's row keeps its original `started_at` (see this
+        module's docstring: `triage_runs` is a live-status projection, one
+        row per `thread_id`, not an append-only log), so this scopes to
+        *when the issue was first triaged*, not when its row last changed."""
         conditions: list[ColumnElement[bool]] = []
         if statuses is not None:
             conditions.append(TriageRun.status.in_([status.value for status in statuses]))
@@ -315,6 +322,8 @@ class TriageRunRepository:
             conditions.append(TriageRun.repo_full_name == repo_full_name)
         if source is not None:
             conditions.append(TriageRun.source == source.value)
+        if started_after is not None:
+            conditions.append(TriageRun.started_at >= started_after)
         return and_(*conditions) if conditions else and_(True)
 
     async def count_runs(
@@ -323,12 +332,18 @@ class TriageRunRepository:
         statuses: list[RunStatus] | None,
         repo_full_name: str | None,
         source: IssueSource | None,
+        started_after: datetime | None,
     ) -> int:
         stmt = (
             select(func.count())
             .select_from(TriageRun)
             .where(
-                self._list_filters(statuses=statuses, repo_full_name=repo_full_name, source=source)
+                self._list_filters(
+                    statuses=statuses,
+                    repo_full_name=repo_full_name,
+                    source=source,
+                    started_after=started_after,
+                )
             )
         )
         async with self._session_factory() as session:
@@ -340,13 +355,19 @@ class TriageRunRepository:
         statuses: list[RunStatus] | None,
         repo_full_name: str | None,
         source: IssueSource | None,
+        started_after: datetime | None,
         offset: int,
         limit: int,
     ) -> list[TriageRun]:
         stmt = (
             select(TriageRun)
             .where(
-                self._list_filters(statuses=statuses, repo_full_name=repo_full_name, source=source)
+                self._list_filters(
+                    statuses=statuses,
+                    repo_full_name=repo_full_name,
+                    source=source,
+                    started_after=started_after,
+                )
             )
             .order_by(TriageRun.updated_at.desc(), TriageRun.thread_id.desc())
             .offset(offset)
