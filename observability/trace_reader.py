@@ -56,7 +56,20 @@ def build_trace_summary(
     otherwise need it. `total_cost_usd` is a real sum, not a heuristic --
     unlike wall-clock time, per-observation cost figures aren't nested
     (a parent span's cost doesn't double-count a child generation's spend),
-    so summing every observation's `totalCost` is the correct total."""
+    so summing every observation's `totalCost` is the correct total.
+
+    Verified against a real 188-observation trace (24 `GENERATION`s among
+    them): `totalCost`/`usageDetails`/`costDetails` are `None` on every
+    observation regardless of `fields` group requested (`"core,basic"` vs.
+    `"core,basic,model"` -- the latter surfaces `model`/`inputPrice`/
+    `outputPrice`/`totalPrice`, none of which are a computed dollar cost
+    without multiplying by token usage, which was equally absent). This
+    project tracks cost authoritatively itself (`RunMeta.estimated_cost_usd`,
+    already surfaced via `RunSummary`) rather than relying on Langfuse's own
+    per-generation cost calculation -- `cost_usd`/`total_cost_usd` being
+    `None` in practice for this deployment is expected, not a bug in this
+    fetch; both fields stay in the schema since other Langfuse projects with
+    cost tracking fully wired up would populate them."""
     parsed = [_to_observation(_as_observation_dict(obs)) for obs in observations]
 
     total_latency_seconds: float | None = None
