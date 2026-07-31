@@ -15,8 +15,9 @@ from api.schemas import (
     RunListResponse,
     RunSummary,
     RunSummaryResponse,
+    TrendPoint,
 )
-from graph.schemas import IssueSource, RunStatus
+from graph.schemas import IssueSource, RunStatus, TimeRangePeriod
 from services.triage_run_record import TriageRunRecord
 
 
@@ -206,11 +207,83 @@ def test_run_detail_response_round_trips_with_no_pipeline_data() -> None:
     assert restored == response
 
 
-def test_run_summary_response_round_trips() -> None:
-    response = RunSummaryResponse(counts_by_status=dict.fromkeys(RunStatus, 0), total_runs=0)
+def test_trend_point_round_trips() -> None:
+    point = TrendPoint(
+        bucket_start=datetime.now(UTC),
+        counts_by_status=dict.fromkeys(RunStatus, 0),
+        run_count=0,
+        total_cost_usd=0.0,
+    )
+    restored = TrendPoint.model_validate_json(point.model_dump_json())
+    assert restored == point
+    assert set(restored.counts_by_status) == set(RunStatus)
+
+
+def test_trend_point_allows_bucket_start_none_for_the_all_time_bucket() -> None:
+    point = TrendPoint(
+        bucket_start=None,
+        counts_by_status=dict.fromkeys(RunStatus, 0),
+        run_count=0,
+        total_cost_usd=0.0,
+    )
+    restored = TrendPoint.model_validate_json(point.model_dump_json())
+    assert restored.bucket_start is None
+
+
+def test_trend_point_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        TrendPoint.model_validate(
+            {
+                "bucket_start": None,
+                "counts_by_status": dict.fromkeys(RunStatus, 0),
+                "run_count": 0,
+                "total_cost_usd": 0.0,
+                "extra_field": "sneaky",
+            }
+        )
+
+
+def test_run_summary_response_round_trips_as_a_single_all_time_bucket() -> None:
+    response = RunSummaryResponse(
+        period=None,
+        interval=None,
+        points=[
+            TrendPoint(
+                bucket_start=None,
+                counts_by_status=dict.fromkeys(RunStatus, 0),
+                run_count=0,
+                total_cost_usd=0.0,
+            )
+        ],
+    )
     restored = RunSummaryResponse.model_validate_json(response.model_dump_json())
     assert restored == response
-    assert set(restored.counts_by_status) == set(RunStatus)
+    assert len(restored.points) == 1
+    assert set(restored.points[0].counts_by_status) == set(RunStatus)
+
+
+def test_run_summary_response_round_trips_with_multiple_buckets() -> None:
+    response = RunSummaryResponse(
+        period=TimeRangePeriod.SEVEN_DAYS,
+        interval="day",
+        points=[
+            TrendPoint(
+                bucket_start=datetime.now(UTC),
+                counts_by_status=dict.fromkeys(RunStatus, 0),
+                run_count=0,
+                total_cost_usd=0.0,
+            ),
+            TrendPoint(
+                bucket_start=datetime.now(UTC),
+                counts_by_status={**dict.fromkeys(RunStatus, 0), RunStatus.FAILED: 2},
+                run_count=2,
+                total_cost_usd=1.25,
+            ),
+        ],
+    )
+    restored = RunSummaryResponse.model_validate_json(response.model_dump_json())
+    assert restored == response
+    assert len(restored.points) == 2
 
 
 def test_github_issues_event_defaults_body_and_labels() -> None:

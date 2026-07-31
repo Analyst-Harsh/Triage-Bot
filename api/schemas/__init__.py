@@ -13,6 +13,7 @@ from api.schemas.run_detail_response import RunDetailResponse
 from api.schemas.run_list_response import RunListResponse
 from api.schemas.run_summary import RunSummary
 from api.schemas.run_summary_response import RunSummaryResponse
+from api.schemas.trend_point import TrendPoint
 
 __all__ = [
     "DetailResponse",
@@ -28,4 +29,5 @@ __all__ = [
     "RunListResponse",
     "RunSummary",
     "RunSummaryResponse",
+    "TrendPoint",
 ]

@@ -429,7 +429,7 @@ async def test_claim_retry_preserves_estimated_cost() -> None:
     assert "estimated_cost_usd=" not in sql
 
 
-# --- list_runs / count_runs / count_by_status --------------------------------
+# --- list_runs / count_runs / get_status_breakdown ---------------------------
 
 
 async def test_list_runs_applies_status_repo_and_source_filters() -> None:
@@ -558,20 +558,57 @@ async def test_count_runs_applies_started_after_filter_when_given() -> None:
     assert str(started_after) in sql
 
 
-async def test_count_by_status_groups_by_status() -> None:
-    session = _FakeAsyncSession(all_rows=[("failed", 3), ("pending_approval", 2)])
+async def test_get_status_breakdown_groups_by_status_when_interval_is_none() -> None:
+    session = _FakeAsyncSession(all_rows=[("failed", 3, 1.5), ("pending_approval", 2, 0.0)])
     repo = make_repo(session)
 
-    result = await repo.count_by_status()
+    result = await repo.get_status_breakdown(since=None, interval=None, repo_full_name=None)
 
-    assert result == {"failed": 3, "pending_approval": 2}
+    assert result == [(None, "failed", 3, 1.5), (None, "pending_approval", 2, 0.0)]
+    sql = compiled(session.executed[0][0])
+    assert "GROUP BY triage_runs.status" in sql
+    assert "date_trunc" not in sql
 
 
-async def test_count_by_status_filters_by_repo_when_given() -> None:
+async def test_get_status_breakdown_filters_by_repo_and_since_when_interval_is_none() -> None:
+    since = datetime(2026, 1, 1, tzinfo=UTC)
     session = _FakeAsyncSession(all_rows=[])
     repo = make_repo(session)
 
-    await repo.count_by_status(repo_full_name="octo/repo")
+    await repo.get_status_breakdown(since=since, interval=None, repo_full_name="octo/repo")
 
     sql = compiled(session.executed[0][0])
     assert "octo/repo" in sql
+    assert "triage_runs.started_at >=" in sql
+    assert str(since) in sql
+
+
+async def test_get_status_breakdown_buckets_by_date_trunc_when_interval_is_given() -> None:
+    bucket = datetime(2026, 1, 1, tzinfo=UTC)
+    session = _FakeAsyncSession(all_rows=[(bucket, "failed", 1, 2.0)])
+    repo = make_repo(session)
+
+    result = await repo.get_status_breakdown(since=None, interval="hour", repo_full_name=None)
+
+    assert result == [(bucket, "failed", 1, 2.0)]
+    sql = compiled(session.executed[0][0])
+    assert "date_trunc('hour', triage_runs.started_at)" in sql
+    assert "GROUP BY date_trunc" in sql
+    assert "ORDER BY date_trunc" in sql
+
+
+async def test_get_status_breakdown_binds_interval_as_a_parameter_not_string_interpolation() -> (
+    None
+):
+    """A malicious/unexpected `interval` value must still come through as a
+    bound literal in the compiled statement, not get spliced into raw SQL
+    text -- `func.date_trunc(interval, ...)` guarantees this structurally,
+    this test just confirms the value still shows up (quoted, as a bound
+    param would render) rather than being silently dropped."""
+    session = _FakeAsyncSession(all_rows=[])
+    repo = make_repo(session)
+
+    await repo.get_status_breakdown(since=None, interval="day", repo_full_name=None)
+
+    sql = compiled(session.executed[0][0])
+    assert "date_trunc('day', triage_runs.started_at)" in sql

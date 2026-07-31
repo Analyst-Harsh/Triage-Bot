@@ -123,7 +123,7 @@ class _FakeRunsRepository:
         get_result: Any = None,
         list_runs_result: list[Any] | None = None,
         count_runs_result: int = 0,
-        count_by_status_result: dict[str, int] | None = None,
+        status_breakdown_result: list[tuple[datetime | None, str, int, float]] | None = None,
     ) -> None:
         self._claim_fresh_result = claim_fresh_result
         self._claim_retry_result = claim_retry_result
@@ -131,7 +131,7 @@ class _FakeRunsRepository:
         self._get_result = get_result
         self._list_runs_result: list[Any] = list_runs_result or []
         self._count_runs_result = count_runs_result
-        self._count_by_status_result = count_by_status_result or {}
+        self._status_breakdown_result = status_breakdown_result or []
         self.claim_fresh_calls: list[dict[str, Any]] = []
         self.claim_retry_calls: list[dict[str, Any]] = []
         self.claim_resume_calls: list[str] = []
@@ -142,7 +142,7 @@ class _FakeRunsRepository:
         self.update_cost_calls: list[tuple[str, float]] = []
         self.list_runs_calls: list[dict[str, Any]] = []
         self.count_runs_calls: list[dict[str, Any]] = []
-        self.count_by_status_calls: list[str | None] = []
+        self.status_breakdown_calls: list[dict[str, Any]] = []
 
     async def claim_fresh_run(self, issue: IssuePayload, *, run_id: UUID, dry_run: bool) -> Any:
         self.claim_fresh_calls.append({"issue": issue, "run_id": run_id, "dry_run": dry_run})
@@ -190,9 +190,17 @@ class _FakeRunsRepository:
         self.count_runs_calls.append(kwargs)
         return self._count_runs_result
 
-    async def count_by_status(self, *, repo_full_name: str | None = None) -> dict[str, int]:
-        self.count_by_status_calls.append(repo_full_name)
-        return self._count_by_status_result
+    async def get_status_breakdown(
+        self,
+        *,
+        since: datetime | None,
+        interval: str | None,
+        repo_full_name: str | None,
+    ) -> list[tuple[datetime | None, str, int, float]]:
+        self.status_breakdown_calls.append(
+            {"since": since, "interval": interval, "repo_full_name": repo_full_name}
+        )
+        return self._status_breakdown_result
 
 
 class _FakeGitHubClient(GitHubClient):
@@ -845,14 +853,91 @@ async def test_list_runs_converts_period_to_started_after_via_time_range_resolve
 # --- get_status_summary ---------------------------------------------------------
 
 
-async def test_get_status_summary_zero_fills_every_status() -> None:
-    repo = _FakeRunsRepository(count_by_status_result={"failed": 3, "pending_approval": 2})
+async def test_get_status_summary_zero_fills_every_status_in_single_bucket() -> None:
+    """`period=None` -- a single all-time bucket, zero-filled the same way
+    the old flat `RunSummaryResponse.counts_by_status` used to be."""
+    repo = _FakeRunsRepository(
+        status_breakdown_result=[(None, "failed", 3, 1.5), (None, "pending_approval", 2, 0.0)]
+    )
     service = make_service(repo=repo)
 
     response = await service.get_status_summary()
 
-    assert response.counts_by_status[RunStatus.FAILED] == 3
-    assert response.counts_by_status[RunStatus.PENDING_APPROVAL] == 2
-    assert response.counts_by_status[RunStatus.RECEIVED] == 0
-    assert response.total_runs == 5
-    assert set(response.counts_by_status) == set(RunStatus)
+    assert response.period is None
+    assert response.interval is None
+    assert len(response.points) == 1
+    point = response.points[0]
+    assert point.bucket_start is None
+    assert point.counts_by_status[RunStatus.FAILED] == 3
+    assert point.counts_by_status[RunStatus.PENDING_APPROVAL] == 2
+    assert point.counts_by_status[RunStatus.RECEIVED] == 0
+    assert set(point.counts_by_status) == set(RunStatus)
+    assert point.run_count == 5
+    assert point.total_cost_usd == 1.5
+
+
+async def test_get_status_summary_with_no_matching_runs_still_returns_one_zero_bucket() -> None:
+    repo = _FakeRunsRepository(status_breakdown_result=[])
+    service = make_service(repo=repo)
+
+    response = await service.get_status_summary()
+
+    assert len(response.points) == 1
+    point = response.points[0]
+    assert point.run_count == 0
+    assert point.total_cost_usd == 0.0
+    assert all(count == 0 for count in point.counts_by_status.values())
+
+
+async def test_get_status_summary_zero_fills_every_status_across_multiple_buckets() -> None:
+    bucket_one = datetime(2026, 1, 1, tzinfo=UTC)
+    bucket_two = datetime(2026, 1, 2, tzinfo=UTC)
+    repo = _FakeRunsRepository(
+        status_breakdown_result=[
+            (bucket_one, "failed", 1, 0.5),
+            (bucket_two, "auto_posted", 4, 2.0),
+        ]
+    )
+    service = make_service(repo=repo)
+
+    response = await service.get_status_summary(period=TimeRangePeriod.SEVEN_DAYS)
+
+    assert response.period == TimeRangePeriod.SEVEN_DAYS
+    assert response.interval == "day"
+    assert [point.bucket_start for point in response.points] == [bucket_one, bucket_two]
+    first, second = response.points
+    assert first.counts_by_status[RunStatus.FAILED] == 1
+    assert first.counts_by_status[RunStatus.AUTO_POSTED] == 0
+    assert first.run_count == 1
+    assert first.total_cost_usd == 0.5
+    assert second.counts_by_status[RunStatus.AUTO_POSTED] == 4
+    assert second.counts_by_status[RunStatus.FAILED] == 0
+    assert second.run_count == 4
+    assert second.total_cost_usd == 2.0
+    assert set(first.counts_by_status) == set(RunStatus)
+    assert set(second.counts_by_status) == set(RunStatus)
+
+
+async def test_get_status_summary_resolves_since_and_interval_via_time_range_resolver(
+    monkeypatch: Any,
+) -> None:
+    frozen_since = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def _fake_since(_self: TimeRangeResolver, _period: TimeRangePeriod | None) -> datetime:
+        return frozen_since
+
+    def _fake_interval(_self: TimeRangeResolver, _period: TimeRangePeriod | None) -> str:
+        return "hour"
+
+    monkeypatch.setattr(service_module.TimeRangeResolver, "since", _fake_since)
+    monkeypatch.setattr(service_module.TimeRangeResolver, "interval", _fake_interval)
+    repo = _FakeRunsRepository(status_breakdown_result=[])
+    service = make_service(repo=repo)
+
+    await service.get_status_summary(
+        repo_full_name="octo/repo", period=TimeRangePeriod.TWENTY_FOUR_HOURS
+    )
+
+    assert repo.status_breakdown_calls == [
+        {"since": frozen_since, "interval": "hour", "repo_full_name": "octo/repo"}
+    ]

@@ -35,3 +35,22 @@ def test_since_subtracts_the_period_delta_from_now(
     result = TimeRangeResolver().since(period)
 
     assert result == frozen_now - expected_delta
+
+
+def test_interval_returns_none_when_period_is_none() -> None:
+    assert TimeRangeResolver().interval(None) is None
+
+
+@pytest.mark.parametrize(
+    ("period", "expected_interval"),
+    [
+        (TimeRangePeriod.ONE_HOUR, "minute"),
+        (TimeRangePeriod.TWENTY_FOUR_HOURS, "hour"),
+        (TimeRangePeriod.SEVEN_DAYS, "day"),
+        (TimeRangePeriod.THIRTY_DAYS, "day"),
+    ],
+)
+def test_interval_maps_period_to_bucket_width(
+    period: TimeRangePeriod, expected_interval: str
+) -> None:
+    assert TimeRangeResolver().interval(period) == expected_interval

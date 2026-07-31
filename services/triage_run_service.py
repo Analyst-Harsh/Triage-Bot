@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
@@ -27,6 +28,7 @@ from api.schemas.run_detail_response import RunDetailResponse
 from api.schemas.run_list_response import RunListResponse
 from api.schemas.run_summary import RunSummary
 from api.schemas.run_summary_response import RunSummaryResponse
+from api.schemas.trend_point import TrendPoint
 from config.settings import Settings
 from graph.builder import build_graph
 from graph.nodes.node_names import NodeName
@@ -177,12 +179,38 @@ class TriageRunService:
             items=items, total=total, page=page, page_size=page_size, total_pages=total_pages
         )
 
-    async def get_status_summary(self, *, repo_full_name: str | None = None) -> RunSummaryResponse:
-        counts = await self._runs_repo.count_by_status(repo_full_name=repo_full_name)
-        counts_by_status = {status: counts.get(status.value, 0) for status in RunStatus}
-        return RunSummaryResponse(
-            counts_by_status=counts_by_status, total_runs=sum(counts_by_status.values())
+    async def get_status_summary(
+        self, *, repo_full_name: str | None = None, period: TimeRangePeriod | None = None
+    ) -> RunSummaryResponse:
+        """`/runs/summary` -- the one endpoint for both current totals and
+        trend data, no separate `/runs/trend`. `period=None` degenerates to
+        a single all-time bucket, which is exactly today's flat totals
+        wrapped in a one-element `points` list instead of returned bare."""
+        resolver = TimeRangeResolver()
+        interval = resolver.interval(period)
+        rows = await self._runs_repo.get_status_breakdown(
+            since=resolver.since(period), interval=interval, repo_full_name=repo_full_name
         )
+        buckets: dict[datetime | None, dict[str, tuple[int, float]]] = {}
+        for bucket_start, status, count, cost in rows:
+            buckets.setdefault(bucket_start, {})[status] = (count, cost)
+        if not buckets:
+            # No runs matched at all -- `points` is never empty, so still
+            # emit one all-zero bucket rather than an empty list.
+            buckets[None] = {}
+
+        points = [
+            TrendPoint(
+                bucket_start=bucket_start,
+                counts_by_status={
+                    status: bucket.get(status.value, (0, 0.0))[0] for status in RunStatus
+                },
+                run_count=sum(count for count, _ in bucket.values()),
+                total_cost_usd=sum(cost for _, cost in bucket.values()),
+            )
+            for bucket_start, bucket in buckets.items()
+        ]
+        return RunSummaryResponse(period=period, interval=interval, points=points)
 
     async def get_pending_approval(self, thread_id: str) -> ApprovalRequest | None:
         """Reads the checkpointer directly -- the authoritative source for

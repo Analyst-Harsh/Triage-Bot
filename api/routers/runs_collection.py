@@ -38,5 +38,6 @@ async def list_runs(
 async def get_runs_summary(
     service: RunServiceDep,
     repo_full_name: Annotated[str | None, Query()] = None,
+    period: Annotated[TimeRangePeriod | None, Query()] = None,
 ) -> RunSummaryResponse:
-    return await service.get_status_summary(repo_full_name=repo_full_name)
+    return await service.get_status_summary(repo_full_name=repo_full_name, period=period)
