@@ -1,7 +1,9 @@
-from config.settings import Settings, get_settings
 from evals.schemas import GoldenCase
 from graph.state import thread_id_for
-from observability.tracing import create_trace_id, ensure_langfuse_client
+from observability.langfuse_reader import ensure_configured
+from observability.tracing import create_trace_id
+
+__all__ = ["ensure_configured", "resolve_trace_id"]
 
 
 def resolve_trace_id(golden_case: GoldenCase) -> str:
@@ -13,17 +15,8 @@ def resolve_trace_id(golden_case: GoldenCase) -> str:
     return create_trace_id(thread_id)
 
 
-def ensure_configured(settings: Settings | None = None) -> Settings:
-    """Fails fast with a clear `RuntimeError` if Langfuse credentials are
-    unset (mirrors `scripts/verify_langfuse_metadata.py`), before any
-    cache-miss fetch is attempted, then ensures the process-wide Langfuse
-    client singleton is constructed. Returns the resolved `Settings` so a
-    caller that already needs it doesn't call `get_settings()` twice."""
-    resolved = settings or get_settings()
-    if resolved.langfuse_public_key is None or resolved.langfuse_secret_key is None:
-        raise RuntimeError(
-            "LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY are not set (via Settings/.env) -- "
-            "required to fetch trace data for evals."
-        )
-    ensure_langfuse_client(resolved)
-    return resolved
+# `ensure_configured` now lives in `observability/langfuse_reader.py` -- a
+# second consumer (the dashboard API's trace-summary endpoint) needed it
+# outside the eval harness. Re-exported here so `evals/cli.py`'s existing
+# `from evals.langfuse_fetch.client import ensure_configured` keeps working
+# unmodified.
