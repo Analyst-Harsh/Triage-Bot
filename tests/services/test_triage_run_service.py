@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 from github import GithubException
 from langchain_core.runnables import RunnableConfig
+from langfuse.api.core.api_error import ApiError
 from langgraph.types import Command
 
 import services.triage_run_service as service_module
@@ -26,13 +27,17 @@ from graph.schemas import (
 )
 from graph.schemas.approval_decision import ActionDecision
 from graph.schemas.approval_request import QueuedActionSummary
+from observability.tracing import create_trace_id
 from services.errors import (
     DecisionMismatchError,
     IssueFetchError,
+    LangfuseNotConfiguredError,
     RetryLimitExceededError,
     RunAlreadyInFlightError,
     RunNotFailedError,
     RunNotFoundError,
+    TraceFetchError,
+    TraceNotFoundError,
 )
 from services.time_range_resolver import TimeRangeResolver
 from services.triage_run_record import TriageRunRecord
@@ -235,6 +240,7 @@ class _FakeGuardrails:
 
 class _FakeSettings:
     guardrails = _FakeGuardrails()
+    langfuse_host = "https://cloud.langfuse.com"
 
 
 class _FakeSnapshot:
@@ -778,6 +784,103 @@ async def test_get_run_detail_combines_record_and_checkpoint_state(monkeypatch: 
     assert detail.run_meta is run_meta
     assert detail.planner_output is None
     assert detail.episodic_context == []
+
+
+# --- get_trace_summary -----------------------------------------------------------
+
+
+def _fake_ensure_configured(settings: Any) -> Any:
+    return settings
+
+
+def _fake_fetch_returns_nothing(_trace_id: str, **_kwargs: Any) -> list[Any]:
+    return []
+
+
+async def test_get_trace_summary_raises_when_no_run_found() -> None:
+    repo = _FakeRunsRepository(get_result=None)
+    service = make_service(repo=repo)
+
+    with pytest.raises(RunNotFoundError):
+        await service.get_trace_summary("octo/repo#42")
+
+
+async def test_get_trace_summary_raises_when_langfuse_not_configured(monkeypatch: Any) -> None:
+    def _raise_unconfigured(_settings: Any) -> Any:
+        raise RuntimeError("LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY are not set")
+
+    monkeypatch.setattr(service_module, "ensure_configured", _raise_unconfigured)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    with pytest.raises(LangfuseNotConfiguredError):
+        await service.get_trace_summary("octo/repo#42")
+
+
+async def test_get_trace_summary_raises_when_no_observations_found(monkeypatch: Any) -> None:
+    monkeypatch.setattr(service_module, "ensure_configured", _fake_ensure_configured)
+    monkeypatch.setattr(service_module, "fetch_observations", _fake_fetch_returns_nothing)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    with pytest.raises(TraceNotFoundError):
+        await service.get_trace_summary("octo/repo#42")
+
+
+async def test_get_trace_summary_raises_on_fetch_api_error(monkeypatch: Any) -> None:
+    def _raise_api_error(_trace_id: str, **_kwargs: Any) -> Any:
+        raise ApiError(status_code=500, body="boom")
+
+    monkeypatch.setattr(service_module, "ensure_configured", _fake_ensure_configured)
+    monkeypatch.setattr(service_module, "fetch_observations", _raise_api_error)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    with pytest.raises(TraceFetchError):
+        await service.get_trace_summary("octo/repo#42")
+
+
+async def test_get_trace_summary_derives_trace_id_and_requests_light_fields(
+    monkeypatch: Any,
+) -> None:
+    """`trace_id` is re-derived from `thread_id` via `create_trace_id`, never
+    read off a checkpoint -- and the lighter `"core,basic"` field group is
+    requested, not eval's full `"core,basic,io,metadata"`."""
+    captured: dict[str, Any] = {}
+
+    def _fake_fetch(trace_id: str, **kwargs: Any) -> list[Any]:
+        captured["trace_id"] = trace_id
+        captured["fields"] = kwargs.get("fields")
+        return [
+            {
+                "id": "obs-1",
+                "parentObservationId": None,
+                "name": "triage_run",
+                "type": "SPAN",
+                "startTime": "2024-01-01T00:00:00Z",
+                "endTime": "2024-01-01T00:00:05Z",
+                "latency": 5.0,
+                "totalCost": 0.01,
+                "level": "DEFAULT",
+            }
+        ]
+
+    monkeypatch.setattr(service_module, "ensure_configured", _fake_ensure_configured)
+    monkeypatch.setattr(service_module, "fetch_observations", _fake_fetch)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    summary = await service.get_trace_summary("octo/repo#42")
+
+    expected_trace_id = create_trace_id("octo/repo#42")
+    assert captured["trace_id"] == expected_trace_id
+    assert captured["fields"] == "core,basic"
+    assert summary.trace_id == expected_trace_id
+    assert summary.langfuse_url == f"https://cloud.langfuse.com/trace/{expected_trace_id}"
+    assert len(summary.observations) == 1
+    assert summary.observations[0].observation_id == "obs-1"
+    assert summary.total_cost_usd == 0.01
+    assert summary.total_latency_seconds == 5.0
 
 
 # --- list_runs -----------------------------------------------------------------

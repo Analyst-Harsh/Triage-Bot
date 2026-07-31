@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 import structlog
 from github import GithubException
 from langchain_core.runnables import RunnableConfig
+from langfuse.api.core.api_error import ApiError
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
@@ -28,6 +29,7 @@ from api.schemas.run_detail_response import RunDetailResponse
 from api.schemas.run_list_response import RunListResponse
 from api.schemas.run_summary import RunSummary
 from api.schemas.run_summary_response import RunSummaryResponse
+from api.schemas.trace_summary_response import TraceSummaryResponse
 from api.schemas.trend_point import TrendPoint
 from config.settings import Settings
 from graph.builder import build_graph
@@ -41,15 +43,20 @@ from graph.schemas import (
     TimeRangePeriod,
 )
 from graph.state import TriageState, TriageStateUpdate, create_initial_state, thread_id_for
+from observability.langfuse_reader import ensure_configured, fetch_observations
+from observability.trace_reader import build_trace_summary
 from observability.tracing import build_callback_handler, create_trace_id, root_span
 from repositories.triage_run_repository import TriageRunRepository
 from services.errors import (
     DecisionMismatchError,
     IssueFetchError,
+    LangfuseNotConfiguredError,
     RetryLimitExceededError,
     RunAlreadyInFlightError,
     RunNotFailedError,
     RunNotFoundError,
+    TraceFetchError,
+    TraceNotFoundError,
 )
 from services.time_range_resolver import TimeRangeResolver
 from services.triage_run_record import TriageRunRecord
@@ -145,6 +152,42 @@ class TriageRunService:
             post_results=state.get("post_results"),
             episodic_context=state.get("episodic_context", []),
             run_meta=state.get("run_meta"),
+        )
+
+    async def get_trace_summary(self, thread_id: str) -> TraceSummaryResponse:
+        """Dashboard trace panel: `trace_id` is re-derived from `thread_id`
+        the same deterministic-hash way `run_fresh`/`run_resume` derive it
+        for a real run (`observability.tracing.create_trace_id`) -- never
+        read off the checkpoint, since it's always reproducible from
+        `thread_id` alone, even before a checkpoint exists (the same
+        pattern `evals/langfuse_fetch/client.py::resolve_trace_id` uses for
+        the eval harness).
+
+        `ensure_configured` raises a bare `RuntimeError` (it's shared with
+        the eval harness, which has no typed-`ServiceError` layer to raise
+        instead) -- caught narrowly here and re-raised as the typed
+        `LangfuseNotConfiguredError` this request path needs."""
+        record = await self._get_record(thread_id)
+        if record is None:
+            raise RunNotFoundError(thread_id)
+
+        trace_id = create_trace_id(thread_id)
+
+        try:
+            ensure_configured(self._settings)
+        except RuntimeError as exc:
+            raise LangfuseNotConfiguredError() from exc
+
+        try:
+            observations = fetch_observations(trace_id, fields="core,basic")
+        except ApiError as exc:
+            raise TraceFetchError(trace_id, str(exc)) from exc
+
+        if not observations:
+            raise TraceNotFoundError(trace_id)
+
+        return build_trace_summary(
+            trace_id, observations, langfuse_host=self._settings.langfuse_host
         )
 
     async def list_runs(

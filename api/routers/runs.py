@@ -4,17 +4,20 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 
 from api.dependencies import RunServiceDep, require_bearer_token
 from api.errors import to_http_exception
-from api.schemas import RetryRequest, RunAcceptedResponse, RunDetailResponse
+from api.schemas import RetryRequest, RunAcceptedResponse, RunDetailResponse, TraceSummaryResponse
 from graph.schemas import ApprovalDecision, ApprovalRequest, RunStatus
 from graph.state import thread_id_for
 from services.errors import (
     DecisionMismatchError,
     IssueFetchError,
+    LangfuseNotConfiguredError,
     NothingPendingError,
     RetryLimitExceededError,
     RunAlreadyInFlightError,
     RunNotFailedError,
     RunNotFoundError,
+    TraceFetchError,
+    TraceNotFoundError,
 )
 from services.triage_run_service import validate_decision_matches
 
@@ -82,6 +85,23 @@ async def get_run_detail(
         exc = RunNotFoundError(run.thread_id)
         raise to_http_exception(exc, detail="no run found for this issue") from exc
     return detail
+
+
+@router.get("/trace", response_model=TraceSummaryResponse)
+async def get_trace_summary(
+    run: Annotated[RunIdentity, Depends()],
+    service: RunServiceDep,
+) -> TraceSummaryResponse:
+    try:
+        return await service.get_trace_summary(run.thread_id)
+    except RunNotFoundError as exc:
+        raise to_http_exception(exc, detail="no run found for this issue") from exc
+    except LangfuseNotConfiguredError as exc:
+        raise to_http_exception(exc) from exc
+    except TraceNotFoundError as exc:
+        raise to_http_exception(exc) from exc
+    except TraceFetchError as exc:
+        raise to_http_exception(exc, detail="could not fetch trace from Langfuse") from exc
 
 
 @router.get("/resume", response_model=ApprovalRequest, name=GET_PENDING_APPROVAL_ROUTE_NAME)

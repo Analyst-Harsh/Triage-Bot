@@ -15,6 +15,8 @@ from api.schemas import (
     RunListResponse,
     RunSummary,
     RunSummaryResponse,
+    TraceObservation,
+    TraceSummaryResponse,
     TrendPoint,
 )
 from graph.schemas import IssueSource, RunStatus, TimeRangePeriod
@@ -284,6 +286,81 @@ def test_run_summary_response_round_trips_with_multiple_buckets() -> None:
     restored = RunSummaryResponse.model_validate_json(response.model_dump_json())
     assert restored == response
     assert len(restored.points) == 2
+
+
+def test_trace_observation_round_trips() -> None:
+    observation = TraceObservation(
+        observation_id="obs-1",
+        parent_observation_id=None,
+        name="triage_run",
+        observation_type="SPAN",
+        start_time=datetime.now(UTC),
+        end_time=datetime.now(UTC) + timedelta(seconds=5),
+        latency_seconds=5.0,
+        cost_usd=0.01,
+        level="DEFAULT",
+    )
+    restored = TraceObservation.model_validate_json(observation.model_dump_json())
+    assert restored == observation
+
+
+def test_trace_observation_allows_null_optional_fields() -> None:
+    observation = TraceObservation(
+        observation_id="obs-1",
+        parent_observation_id=None,
+        name=None,
+        observation_type="CHAIN",
+        start_time=datetime.now(UTC),
+        end_time=None,
+        latency_seconds=None,
+        cost_usd=None,
+        level=None,
+    )
+    restored = TraceObservation.model_validate_json(observation.model_dump_json())
+    assert restored == observation
+
+
+def test_trace_observation_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        TraceObservation.model_validate(
+            {
+                "observation_id": "obs-1",
+                "parent_observation_id": None,
+                "name": None,
+                "observation_type": "SPAN",
+                "start_time": datetime.now(UTC),
+                "end_time": None,
+                "latency_seconds": None,
+                "cost_usd": None,
+                "level": None,
+                "extra_field": "sneaky",
+            }
+        )
+
+
+def test_trace_summary_response_round_trips() -> None:
+    response = TraceSummaryResponse(
+        trace_id="deadbeef",
+        langfuse_url="https://cloud.langfuse.com/trace/deadbeef",
+        total_latency_seconds=5.0,
+        total_cost_usd=0.01,
+        observations=[
+            TraceObservation(
+                observation_id="obs-1",
+                parent_observation_id=None,
+                name="triage_run",
+                observation_type="SPAN",
+                start_time=datetime.now(UTC),
+                end_time=None,
+                latency_seconds=None,
+                cost_usd=None,
+                level=None,
+            )
+        ],
+    )
+    restored = TraceSummaryResponse.model_validate_json(response.model_dump_json())
+    assert restored == response
+    assert len(restored.observations) == 1
 
 
 def test_github_issues_event_defaults_body_and_labels() -> None:

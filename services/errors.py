@@ -41,6 +41,10 @@ class BadGatewayError(ServiceError):
     status_code = 502
 
 
+class ServiceUnavailableError(ServiceError):
+    status_code = 503
+
+
 class RunAlreadyInFlightError(ConflictError):
     """A claim (fresh start, retry, or resume) lost the race: another
     request already owns this thread_id right now."""
@@ -120,3 +124,37 @@ class DecisionMismatchError(BadRequestError):
         super().__init__(
             f"decision indices {sorted(decided)} do not match queued indices {sorted(queued)}"
         )
+
+
+class LangfuseNotConfiguredError(ServiceUnavailableError):
+    """`Settings.langfuse_public_key`/`langfuse_secret_key` are unset --
+    trace data can't be fetched at all. Mirrors
+    `api.dependencies.require_bearer_token`'s unset-secret 503: a
+    server-configuration gap, not a client error."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Langfuse is not configured (LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY unset)"
+        )
+
+
+class TraceNotFoundError(NotFoundError):
+    """`fetch_observations` succeeded but returned nothing for this
+    trace_id -- tracing wasn't configured when this run happened, or
+    ingestion hasn't caught up yet. Distinct from `RunNotFoundError` (no
+    `triage_runs` row at all)."""
+
+    def __init__(self, trace_id: str) -> None:
+        self.trace_id = trace_id
+        super().__init__(f"no trace data found in Langfuse for trace_id {trace_id}")
+
+
+class TraceFetchError(BadGatewayError):
+    """The Langfuse API call itself failed (network error, non-2xx
+    response) -- distinct from `TraceNotFoundError`, which is a clean empty
+    result, not a failure."""
+
+    def __init__(self, trace_id: str, reason: str) -> None:
+        self.trace_id = trace_id
+        self.reason = reason
+        super().__init__(f"could not fetch trace {trace_id} from Langfuse: {reason}")

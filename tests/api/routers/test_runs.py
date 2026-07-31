@@ -12,6 +12,7 @@ from api.dependencies import get_run_service
 from api.routers.runs import router
 from api.schemas.run_detail_response import RunDetailResponse
 from api.schemas.run_summary import RunSummary
+from api.schemas.trace_summary_response import TraceSummaryResponse
 from config.settings import Settings, get_settings
 from graph.schemas import (
     ActionType,
@@ -24,10 +25,13 @@ from graph.schemas import (
 from graph.schemas.approval_request import QueuedActionSummary
 from services.errors import (
     IssueFetchError,
+    LangfuseNotConfiguredError,
     RetryLimitExceededError,
     RunAlreadyInFlightError,
     RunNotFailedError,
     RunNotFoundError,
+    TraceFetchError,
+    TraceNotFoundError,
 )
 from services.triage_run_record import TriageRunRecord
 from tests.api._http import get, post
@@ -90,6 +94,8 @@ class _FakeService:
         claim_resume_error: Exception | None = None,
         prepare_retry_result: tuple[Any, Any] | None = None,
         prepare_retry_error: Exception | None = None,
+        trace_summary: TraceSummaryResponse | None = None,
+        trace_summary_error: Exception | None = None,
     ) -> None:
         self._pending_approval = pending_approval
         self._run = run
@@ -97,6 +103,8 @@ class _FakeService:
         self._claim_resume_error = claim_resume_error
         self._prepare_retry_result = prepare_retry_result
         self._prepare_retry_error = prepare_retry_error
+        self._trace_summary = trace_summary
+        self._trace_summary_error = trace_summary_error
         self.run_resume_calls: list[Any] = []
         self.run_fresh_calls: list[Any] = []
 
@@ -108,6 +116,12 @@ class _FakeService:
 
     async def get_run_detail(self, _thread_id: str) -> RunDetailResponse | None:
         return self._run_detail
+
+    async def get_trace_summary(self, _thread_id: str) -> TraceSummaryResponse:
+        if self._trace_summary_error is not None:
+            raise self._trace_summary_error
+        assert self._trace_summary is not None
+        return self._trace_summary
 
     async def claim_resume(self, thread_id: str) -> None:  # noqa: ARG002
         if self._claim_resume_error is not None:
@@ -183,6 +197,74 @@ def test_get_run_detail_returns_combined_detail() -> None:
     assert body["run"]["thread_id"] == "octo/repo#42"
     assert body["planner_output"] is None
     assert body["episodic_context"] == []
+
+
+def make_trace_summary(**overrides: Any) -> TraceSummaryResponse:
+    defaults: dict[str, Any] = {
+        "trace_id": "deadbeef",
+        "langfuse_url": "https://cloud.langfuse.com/trace/deadbeef",
+        "total_latency_seconds": 5.0,
+        "total_cost_usd": 0.01,
+        "observations": [],
+    }
+    defaults.update(overrides)
+    return TraceSummaryResponse(**defaults)
+
+
+def test_get_trace_summary_requires_bearer_token() -> None:
+    client = TestClient(make_app(_FakeService()))
+    response = get(client, "/runs/octo/repo/42/trace")
+    assert response.status_code == 401
+
+
+def test_get_trace_summary_returns_200_with_summary() -> None:
+    service = _FakeService(trace_summary=make_trace_summary())
+    client = TestClient(make_app(service))
+
+    response = get(client, "/runs/octo/repo/42/trace", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["trace_id"] == "deadbeef"
+    assert body["observations"] == []
+
+
+def test_get_trace_summary_returns_404_when_run_not_found() -> None:
+    service = _FakeService(trace_summary_error=RunNotFoundError("octo/repo#42"))
+    client = TestClient(make_app(service))
+
+    response = get(client, "/runs/octo/repo/42/trace", headers=AUTH_HEADERS)
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["detail"] == "no run found for this issue"
+
+
+def test_get_trace_summary_returns_404_when_trace_not_found() -> None:
+    service = _FakeService(trace_summary_error=TraceNotFoundError("deadbeef"))
+    client = TestClient(make_app(service))
+
+    response = get(client, "/runs/octo/repo/42/trace", headers=AUTH_HEADERS)
+
+    assert response.status_code == 404
+
+
+def test_get_trace_summary_returns_502_when_fetch_fails() -> None:
+    service = _FakeService(trace_summary_error=TraceFetchError("deadbeef", "network error"))
+    client = TestClient(make_app(service))
+
+    response = get(client, "/runs/octo/repo/42/trace", headers=AUTH_HEADERS)
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["detail"] == "could not fetch trace from Langfuse"
+
+
+def test_get_trace_summary_returns_503_when_langfuse_not_configured() -> None:
+    service = _FakeService(trace_summary_error=LangfuseNotConfiguredError())
+    client = TestClient(make_app(service))
+
+    response = get(client, "/runs/octo/repo/42/trace", headers=AUTH_HEADERS)
+
+    assert response.status_code == 503
 
 
 def test_get_resume_requires_bearer_token() -> None:
