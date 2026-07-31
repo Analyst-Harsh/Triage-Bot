@@ -68,11 +68,21 @@ export function useLiveHealthSummaryQuery(initialData?: RunSummaryResponse) {
   });
 }
 
-export function useRunDetailQuery(owner: string, repo: string, issueNumber: number) {
+/** Run detail page. `initialData` mirrors `useLiveHealthSummaryQuery`'s
+ * pattern -- threaded explicitly from the Server Component's own prefetch
+ * rather than relying solely on `HydrationBoundary`, the same fix that
+ * resolved a real cross-tree hydration timing bug found in live testing. */
+export function useRunDetailQuery(
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  initialData?: RunDetailResponse,
+) {
   return useQuery({
     queryKey: queryKeys.runDetail(owner, repo, issueNumber),
     queryFn: () =>
       fetchJson<RunDetailResponse>(`/api/runs/${owner}/${repo}/${issueNumber}`),
+    initialData,
     refetchInterval: 5_000,
     refetchIntervalInBackground: false,
   });
