@@ -12,6 +12,14 @@ pre-commit:
     pyright:
       glob: "*.py"
       run: uv run pyright {staged_files}
+    dashboard-lint:
+      root: "dashboard/"
+      glob: "*.{js,jsx,ts,tsx,mjs,cjs}"
+      run: npm run lint
+    dashboard-typecheck:
+      root: "dashboard/"
+      glob: "*.{ts,tsx}"
+      run: npm run typecheck
     detect-secrets:
       run: uv run detect-secrets-hook --baseline .secrets.baseline {staged_files}
 
@@ -33,3 +41,9 @@ pre-push:
       run: uv run pytest -q
     pip-audit:
       run: uv run pip-audit
+    dashboard-lint:
+      run: cd dashboard && npm run lint
+    dashboard-typecheck:
+      run: cd dashboard && npm run typecheck
+    dashboard-test:
+      run: cd dashboard && npm test

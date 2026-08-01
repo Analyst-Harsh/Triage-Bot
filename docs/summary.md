@@ -40,9 +40,15 @@ This used to be future work; it isn't anymore. `api/app.py` is a FastAPI app who
 
 - An HMAC-verified, idempotent GitHub webhook receiver that starts a fresh run.
 - Resume (`GET`/`POST /runs/{owner}/{repo}/{issue}/resume`) and retry endpoints for the human-approval flow.
-- Read-side dashboard endpoints — paginated run list, run detail, status-summary counts — meant to back a future ops-dashboard UI.
+- Read-side dashboard endpoints — paginated run list, run detail, status-summary counts — backing the operator dashboard (`dashboard/`, see below).
 
 `/runs/*` routes require a bearer token; the webhook route is authenticated separately by its own HMAC signature. `main.py`'s replay pipeline is untouched by this — it still uses its own SQLite checkpointer and an interactive terminal approval prompt, not `TriageRunService`.
+
+## The operator dashboard (`dashboard/`) — built
+
+Also no longer future work: a Next.js 16 (App Router) app consuming the read-side endpoints above. An overview page (stat cards, status distribution, a filterable/paginated runs table, a system-health panel) and a per-run detail page — the full pipeline output as a sequence of sections (planner, research, draft with an embedded diff viewer, risk, post-results, episodic-memory hits) plus an embedded Langfuse trace summary and an approve/reject panel for runs paused on human approval.
+
+Server Components fetch the FastAPI backend directly, server-to-server, so the bearer token never reaches the browser; Client Components go through same-origin Next.js Route Handlers that proxy to FastAPI instead, since the backend has no CORS support and a single static bearer token. Full detail: `dashboard/README.md`.
 
 ## What wraps around all of this (the part that makes it "production," not a demo toy)
 
@@ -55,8 +61,8 @@ These aren't extra nodes in the graph — they're systems that touch every node:
 
 ## What's still ahead
 
-- **A real internal ops dashboard** — a live feed of issues being triaged, a queue of things waiting on your approval, and per-run cost/latency numbers, consuming the read-side endpoints `api/` already exposes. This is still unbuilt, and Next.js/TypeScript remains the plan for it — **distinct from `github_page/`** (below), which is a marketing/portfolio site, not a live operational view.
-- **`github_page/`** — a React 19 + Vite + Three.js/GSAP marketing site is live now at [analyst-harsh.github.io/Triage-Bot](https://analyst-harsh.github.io/Triage-Bot/), showing the pipeline, the security posture, and the tech stack. Its dashboard visual is an illustrative mockup, not a real screenshot of the (not-yet-built) ops dashboard above.
+- **Deploying the operator dashboard somewhere real** — `dashboard/` is built and runs locally against the FastAPI API, but it isn't hosted anywhere yet; there's no live URL for it the way there is for `github_page/`.
+- **`github_page/`** — a React 19 + Vite + Three.js/GSAP marketing site is live now at [analyst-harsh.github.io/Triage-Bot](https://analyst-harsh.github.io/Triage-Bot/), showing the pipeline, the security posture, and the tech stack. Its dashboard visual is an illustrative mockup, not a real screenshot of the operator dashboard above — **distinct from `dashboard/`**, which is the actual live operational view, not marketing.
 - **A documented near-miss** — one real case where the agent almost did something wrong (e.g. mislabeling a valid bug as a duplicate) and the guardrail that caught it, written up as a concrete story. Roadmap item, not done yet.
 
-Full stack: LangGraph, LangChain, MCP, E2B, PyGithub, Tavily, Pydantic, FastAPI, Postgres/pgvector, SQLAlchemy, Langfuse (OpenTelemetry-based), and — for the still-unbuilt ops dashboard specifically — Next.js/TypeScript.
+Full stack: LangGraph, LangChain, MCP, E2B, PyGithub, Tavily, Pydantic, FastAPI, Postgres/pgvector, SQLAlchemy, Langfuse (OpenTelemetry-based), and — for the operator dashboard (`dashboard/`) — Next.js/TypeScript.
