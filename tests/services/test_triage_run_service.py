@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 from github import GithubException
 from langchain_core.runnables import RunnableConfig
+from langfuse.api.core.api_error import ApiError
 from langgraph.types import Command
 
 import services.triage_run_service as service_module
@@ -22,17 +23,23 @@ from graph.schemas import (
     RiskLevel,
     RunMeta,
     RunStatus,
+    TimeRangePeriod,
 )
 from graph.schemas.approval_decision import ActionDecision
 from graph.schemas.approval_request import QueuedActionSummary
+from observability.tracing import create_trace_id
 from services.errors import (
     DecisionMismatchError,
     IssueFetchError,
+    LangfuseNotConfiguredError,
     RetryLimitExceededError,
     RunAlreadyInFlightError,
     RunNotFailedError,
     RunNotFoundError,
+    TraceFetchError,
+    TraceNotFoundError,
 )
+from services.time_range_resolver import TimeRangeResolver
 from services.triage_run_record import TriageRunRecord
 from services.triage_run_service import TriageRunService, validate_decision_matches
 from utils.github_client import GitHubClient
@@ -121,7 +128,7 @@ class _FakeRunsRepository:
         get_result: Any = None,
         list_runs_result: list[Any] | None = None,
         count_runs_result: int = 0,
-        count_by_status_result: dict[str, int] | None = None,
+        status_breakdown_result: list[tuple[datetime | None, str, int, float]] | None = None,
     ) -> None:
         self._claim_fresh_result = claim_fresh_result
         self._claim_retry_result = claim_retry_result
@@ -129,7 +136,7 @@ class _FakeRunsRepository:
         self._get_result = get_result
         self._list_runs_result: list[Any] = list_runs_result or []
         self._count_runs_result = count_runs_result
-        self._count_by_status_result = count_by_status_result or {}
+        self._status_breakdown_result = status_breakdown_result or []
         self.claim_fresh_calls: list[dict[str, Any]] = []
         self.claim_retry_calls: list[dict[str, Any]] = []
         self.claim_resume_calls: list[str] = []
@@ -140,7 +147,7 @@ class _FakeRunsRepository:
         self.update_cost_calls: list[tuple[str, float]] = []
         self.list_runs_calls: list[dict[str, Any]] = []
         self.count_runs_calls: list[dict[str, Any]] = []
-        self.count_by_status_calls: list[str | None] = []
+        self.status_breakdown_calls: list[dict[str, Any]] = []
 
     async def claim_fresh_run(self, issue: IssuePayload, *, run_id: UUID, dry_run: bool) -> Any:
         self.claim_fresh_calls.append({"issue": issue, "run_id": run_id, "dry_run": dry_run})
@@ -188,9 +195,17 @@ class _FakeRunsRepository:
         self.count_runs_calls.append(kwargs)
         return self._count_runs_result
 
-    async def count_by_status(self, *, repo_full_name: str | None = None) -> dict[str, int]:
-        self.count_by_status_calls.append(repo_full_name)
-        return self._count_by_status_result
+    async def get_status_breakdown(
+        self,
+        *,
+        since: datetime | None,
+        interval: str | None,
+        repo_full_name: str | None,
+    ) -> list[tuple[datetime | None, str, int, float]]:
+        self.status_breakdown_calls.append(
+            {"since": since, "interval": interval, "repo_full_name": repo_full_name}
+        )
+        return self._status_breakdown_result
 
 
 class _FakeGitHubClient(GitHubClient):
@@ -225,6 +240,7 @@ class _FakeGuardrails:
 
 class _FakeSettings:
     guardrails = _FakeGuardrails()
+    langfuse_host = "https://cloud.langfuse.com"
 
 
 class _FakeSnapshot:
@@ -770,6 +786,103 @@ async def test_get_run_detail_combines_record_and_checkpoint_state(monkeypatch: 
     assert detail.episodic_context == []
 
 
+# --- get_trace_summary -----------------------------------------------------------
+
+
+def _fake_ensure_configured(settings: Any) -> Any:
+    return settings
+
+
+def _fake_fetch_returns_nothing(_trace_id: str, **_kwargs: Any) -> list[Any]:
+    return []
+
+
+async def test_get_trace_summary_raises_when_no_run_found() -> None:
+    repo = _FakeRunsRepository(get_result=None)
+    service = make_service(repo=repo)
+
+    with pytest.raises(RunNotFoundError):
+        await service.get_trace_summary("octo/repo#42")
+
+
+async def test_get_trace_summary_raises_when_langfuse_not_configured(monkeypatch: Any) -> None:
+    def _raise_unconfigured(_settings: Any) -> Any:
+        raise RuntimeError("LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY are not set")
+
+    monkeypatch.setattr(service_module, "ensure_configured", _raise_unconfigured)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    with pytest.raises(LangfuseNotConfiguredError):
+        await service.get_trace_summary("octo/repo#42")
+
+
+async def test_get_trace_summary_raises_when_no_observations_found(monkeypatch: Any) -> None:
+    monkeypatch.setattr(service_module, "ensure_configured", _fake_ensure_configured)
+    monkeypatch.setattr(service_module, "fetch_observations", _fake_fetch_returns_nothing)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    with pytest.raises(TraceNotFoundError):
+        await service.get_trace_summary("octo/repo#42")
+
+
+async def test_get_trace_summary_raises_on_fetch_api_error(monkeypatch: Any) -> None:
+    def _raise_api_error(_trace_id: str, **_kwargs: Any) -> Any:
+        raise ApiError(status_code=500, body="boom")
+
+    monkeypatch.setattr(service_module, "ensure_configured", _fake_ensure_configured)
+    monkeypatch.setattr(service_module, "fetch_observations", _raise_api_error)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    with pytest.raises(TraceFetchError):
+        await service.get_trace_summary("octo/repo#42")
+
+
+async def test_get_trace_summary_derives_trace_id_and_requests_light_fields(
+    monkeypatch: Any,
+) -> None:
+    """`trace_id` is re-derived from `thread_id` via `create_trace_id`, never
+    read off a checkpoint -- and the lighter `"core,basic"` field group is
+    requested, not eval's full `"core,basic,io,metadata"`."""
+    captured: dict[str, Any] = {}
+
+    def _fake_fetch(trace_id: str, **kwargs: Any) -> list[Any]:
+        captured["trace_id"] = trace_id
+        captured["fields"] = kwargs.get("fields")
+        return [
+            {
+                "id": "obs-1",
+                "parentObservationId": None,
+                "name": "triage_run",
+                "type": "SPAN",
+                "startTime": "2024-01-01T00:00:00Z",
+                "endTime": "2024-01-01T00:00:05Z",
+                "latency": 5.0,
+                "totalCost": 0.01,
+                "level": "DEFAULT",
+            }
+        ]
+
+    monkeypatch.setattr(service_module, "ensure_configured", _fake_ensure_configured)
+    monkeypatch.setattr(service_module, "fetch_observations", _fake_fetch)
+    repo = _FakeRunsRepository(get_result=make_record())
+    service = make_service(repo=repo)
+
+    summary = await service.get_trace_summary("octo/repo#42")
+
+    expected_trace_id = create_trace_id("octo/repo#42")
+    assert captured["trace_id"] == expected_trace_id
+    assert captured["fields"] == "core,basic"
+    assert summary.trace_id == expected_trace_id
+    assert summary.langfuse_url == f"https://cloud.langfuse.com/trace/{expected_trace_id}"
+    assert len(summary.observations) == 1
+    assert summary.observations[0].observation_id == "obs-1"
+    assert summary.total_cost_usd == 0.01
+    assert summary.total_latency_seconds == 5.0
+
+
 # --- list_runs -----------------------------------------------------------------
 
 
@@ -780,7 +893,7 @@ async def test_list_runs_computes_offset_and_total_pages() -> None:
     service = make_service(repo=repo)
 
     response = await service.list_runs(
-        page=3, page_size=20, statuses=None, repo_full_name=None, source=None
+        page=3, page_size=20, statuses=None, repo_full_name=None, source=None, period=None
     )
 
     assert repo.list_runs_calls == [
@@ -788,6 +901,7 @@ async def test_list_runs_computes_offset_and_total_pages() -> None:
             "statuses": None,
             "repo_full_name": None,
             "source": None,
+            "started_after": None,
             "offset": 40,
             "limit": 20,
         }
@@ -804,24 +918,129 @@ async def test_list_runs_returns_zero_total_pages_when_empty() -> None:
     service = make_service(repo=repo)
 
     response = await service.list_runs(
-        page=1, page_size=20, statuses=None, repo_full_name=None, source=None
+        page=1, page_size=20, statuses=None, repo_full_name=None, source=None, period=None
     )
 
     assert response.total_pages == 0
     assert response.items == []
 
 
+async def test_list_runs_converts_period_to_started_after_via_time_range_resolver(
+    monkeypatch: Any,
+) -> None:
+    """`period` must be resolved through `TimeRangeResolver.since` and the
+    result threaded down as `started_after` -- not passed to the repository
+    as-is, and not resolved by some ad-hoc inline computation."""
+    frozen_since = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def _fake_since(_self: TimeRangeResolver, _period: TimeRangePeriod | None) -> datetime:
+        return frozen_since
+
+    monkeypatch.setattr(service_module.TimeRangeResolver, "since", _fake_since)
+    repo = _FakeRunsRepository(list_runs_result=[], count_runs_result=0)
+    service = make_service(repo=repo)
+
+    await service.list_runs(
+        page=1,
+        page_size=20,
+        statuses=None,
+        repo_full_name=None,
+        source=None,
+        period=TimeRangePeriod.ONE_HOUR,
+    )
+
+    assert repo.list_runs_calls[0]["started_after"] == frozen_since
+    assert repo.count_runs_calls[0]["started_after"] == frozen_since
+
+
 # --- get_status_summary ---------------------------------------------------------
 
 
-async def test_get_status_summary_zero_fills_every_status() -> None:
-    repo = _FakeRunsRepository(count_by_status_result={"failed": 3, "pending_approval": 2})
+async def test_get_status_summary_zero_fills_every_status_in_single_bucket() -> None:
+    """`period=None` -- a single all-time bucket, zero-filled the same way
+    the old flat `RunSummaryResponse.counts_by_status` used to be."""
+    repo = _FakeRunsRepository(
+        status_breakdown_result=[(None, "failed", 3, 1.5), (None, "pending_approval", 2, 0.0)]
+    )
     service = make_service(repo=repo)
 
     response = await service.get_status_summary()
 
-    assert response.counts_by_status[RunStatus.FAILED] == 3
-    assert response.counts_by_status[RunStatus.PENDING_APPROVAL] == 2
-    assert response.counts_by_status[RunStatus.RECEIVED] == 0
-    assert response.total_runs == 5
-    assert set(response.counts_by_status) == set(RunStatus)
+    assert response.period is None
+    assert response.interval is None
+    assert len(response.points) == 1
+    point = response.points[0]
+    assert point.bucket_start is None
+    assert point.counts_by_status[RunStatus.FAILED] == 3
+    assert point.counts_by_status[RunStatus.PENDING_APPROVAL] == 2
+    assert point.counts_by_status[RunStatus.RECEIVED] == 0
+    assert set(point.counts_by_status) == set(RunStatus)
+    assert point.run_count == 5
+    assert point.total_cost_usd == 1.5
+
+
+async def test_get_status_summary_with_no_matching_runs_still_returns_one_zero_bucket() -> None:
+    repo = _FakeRunsRepository(status_breakdown_result=[])
+    service = make_service(repo=repo)
+
+    response = await service.get_status_summary()
+
+    assert len(response.points) == 1
+    point = response.points[0]
+    assert point.run_count == 0
+    assert point.total_cost_usd == 0.0
+    assert all(count == 0 for count in point.counts_by_status.values())
+
+
+async def test_get_status_summary_zero_fills_every_status_across_multiple_buckets() -> None:
+    bucket_one = datetime(2026, 1, 1, tzinfo=UTC)
+    bucket_two = datetime(2026, 1, 2, tzinfo=UTC)
+    repo = _FakeRunsRepository(
+        status_breakdown_result=[
+            (bucket_one, "failed", 1, 0.5),
+            (bucket_two, "auto_posted", 4, 2.0),
+        ]
+    )
+    service = make_service(repo=repo)
+
+    response = await service.get_status_summary(period=TimeRangePeriod.SEVEN_DAYS)
+
+    assert response.period == TimeRangePeriod.SEVEN_DAYS
+    assert response.interval == "day"
+    assert [point.bucket_start for point in response.points] == [bucket_one, bucket_two]
+    first, second = response.points
+    assert first.counts_by_status[RunStatus.FAILED] == 1
+    assert first.counts_by_status[RunStatus.AUTO_POSTED] == 0
+    assert first.run_count == 1
+    assert first.total_cost_usd == 0.5
+    assert second.counts_by_status[RunStatus.AUTO_POSTED] == 4
+    assert second.counts_by_status[RunStatus.FAILED] == 0
+    assert second.run_count == 4
+    assert second.total_cost_usd == 2.0
+    assert set(first.counts_by_status) == set(RunStatus)
+    assert set(second.counts_by_status) == set(RunStatus)
+
+
+async def test_get_status_summary_resolves_since_and_interval_via_time_range_resolver(
+    monkeypatch: Any,
+) -> None:
+    frozen_since = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def _fake_since(_self: TimeRangeResolver, _period: TimeRangePeriod | None) -> datetime:
+        return frozen_since
+
+    def _fake_interval(_self: TimeRangeResolver, _period: TimeRangePeriod | None) -> str:
+        return "hour"
+
+    monkeypatch.setattr(service_module.TimeRangeResolver, "since", _fake_since)
+    monkeypatch.setattr(service_module.TimeRangeResolver, "interval", _fake_interval)
+    repo = _FakeRunsRepository(status_breakdown_result=[])
+    service = make_service(repo=repo)
+
+    await service.get_status_summary(
+        repo_full_name="octo/repo", period=TimeRangePeriod.TWENTY_FOUR_HOURS
+    )
+
+    assert repo.status_breakdown_calls == [
+        {"since": frozen_since, "interval": "hour", "repo_full_name": "octo/repo"}
+    ]

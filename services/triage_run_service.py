@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
 import structlog
 from github import GithubException
 from langchain_core.runnables import RunnableConfig
+from langfuse.api.core.api_error import ApiError
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
@@ -27,21 +29,36 @@ from api.schemas.run_detail_response import RunDetailResponse
 from api.schemas.run_list_response import RunListResponse
 from api.schemas.run_summary import RunSummary
 from api.schemas.run_summary_response import RunSummaryResponse
+from api.schemas.trace_summary_response import TraceSummaryResponse
+from api.schemas.trend_point import TrendPoint
 from config.settings import Settings
 from graph.builder import build_graph
 from graph.nodes.node_names import NodeName
-from graph.schemas import ApprovalDecision, ApprovalRequest, IssuePayload, IssueSource, RunStatus
+from graph.schemas import (
+    ApprovalDecision,
+    ApprovalRequest,
+    IssuePayload,
+    IssueSource,
+    RunStatus,
+    TimeRangePeriod,
+)
 from graph.state import TriageState, TriageStateUpdate, create_initial_state, thread_id_for
+from observability.langfuse_reader import ensure_configured, fetch_observations
+from observability.trace_reader import build_trace_summary
 from observability.tracing import build_callback_handler, create_trace_id, root_span
 from repositories.triage_run_repository import TriageRunRepository
 from services.errors import (
     DecisionMismatchError,
     IssueFetchError,
+    LangfuseNotConfiguredError,
     RetryLimitExceededError,
     RunAlreadyInFlightError,
     RunNotFailedError,
     RunNotFoundError,
+    TraceFetchError,
+    TraceNotFoundError,
 )
+from services.time_range_resolver import TimeRangeResolver
 from services.triage_run_record import TriageRunRecord
 from tools.sandbox import sandbox_toolset
 from utils.episodic_memory_store import BaseEpisodicMemoryStore
@@ -137,6 +154,42 @@ class TriageRunService:
             run_meta=state.get("run_meta"),
         )
 
+    async def get_trace_summary(self, thread_id: str) -> TraceSummaryResponse:
+        """Dashboard trace panel: `trace_id` is re-derived from `thread_id`
+        the same deterministic-hash way `run_fresh`/`run_resume` derive it
+        for a real run (`observability.tracing.create_trace_id`) -- never
+        read off the checkpoint, since it's always reproducible from
+        `thread_id` alone, even before a checkpoint exists (the same
+        pattern `evals/langfuse_fetch/client.py::resolve_trace_id` uses for
+        the eval harness).
+
+        `ensure_configured` raises a bare `RuntimeError` (it's shared with
+        the eval harness, which has no typed-`ServiceError` layer to raise
+        instead) -- caught narrowly here and re-raised as the typed
+        `LangfuseNotConfiguredError` this request path needs."""
+        record = await self._get_record(thread_id)
+        if record is None:
+            raise RunNotFoundError(thread_id)
+
+        trace_id = create_trace_id(thread_id)
+
+        try:
+            ensure_configured(self._settings)
+        except RuntimeError as exc:
+            raise LangfuseNotConfiguredError() from exc
+
+        try:
+            observations = fetch_observations(trace_id, fields="core,basic")
+        except ApiError as exc:
+            raise TraceFetchError(trace_id, str(exc)) from exc
+
+        if not observations:
+            raise TraceNotFoundError(trace_id)
+
+        return build_trace_summary(
+            trace_id, observations, langfuse_host=self._settings.langfuse_host
+        )
+
     async def list_runs(
         self,
         *,
@@ -145,15 +198,21 @@ class TriageRunService:
         statuses: list[RunStatus] | None,
         repo_full_name: str | None,
         source: IssueSource | None,
+        period: TimeRangePeriod | None,
     ) -> RunListResponse:
         offset = (page - 1) * page_size
+        started_after = TimeRangeResolver().since(period)
         total = await self._runs_repo.count_runs(
-            statuses=statuses, repo_full_name=repo_full_name, source=source
+            statuses=statuses,
+            repo_full_name=repo_full_name,
+            source=source,
+            started_after=started_after,
         )
         rows = await self._runs_repo.list_runs(
             statuses=statuses,
             repo_full_name=repo_full_name,
             source=source,
+            started_after=started_after,
             offset=offset,
             limit=page_size,
         )
@@ -163,12 +222,38 @@ class TriageRunService:
             items=items, total=total, page=page, page_size=page_size, total_pages=total_pages
         )
 
-    async def get_status_summary(self, *, repo_full_name: str | None = None) -> RunSummaryResponse:
-        counts = await self._runs_repo.count_by_status(repo_full_name=repo_full_name)
-        counts_by_status = {status: counts.get(status.value, 0) for status in RunStatus}
-        return RunSummaryResponse(
-            counts_by_status=counts_by_status, total_runs=sum(counts_by_status.values())
+    async def get_status_summary(
+        self, *, repo_full_name: str | None = None, period: TimeRangePeriod | None = None
+    ) -> RunSummaryResponse:
+        """`/runs/summary` -- the one endpoint for both current totals and
+        trend data, no separate `/runs/trend`. `period=None` degenerates to
+        a single all-time bucket, which is exactly today's flat totals
+        wrapped in a one-element `points` list instead of returned bare."""
+        resolver = TimeRangeResolver()
+        interval = resolver.interval(period)
+        rows = await self._runs_repo.get_status_breakdown(
+            since=resolver.since(period), interval=interval, repo_full_name=repo_full_name
         )
+        buckets: dict[datetime | None, dict[str, tuple[int, float]]] = {}
+        for bucket_start, status, count, cost in rows:
+            buckets.setdefault(bucket_start, {})[status] = (count, cost)
+        if not buckets:
+            # No runs matched at all -- `points` is never empty, so still
+            # emit one all-zero bucket rather than an empty list.
+            buckets[None] = {}
+
+        points = [
+            TrendPoint(
+                bucket_start=bucket_start,
+                counts_by_status={
+                    status: bucket.get(status.value, (0, 0.0))[0] for status in RunStatus
+                },
+                run_count=sum(count for count, _ in bucket.values()),
+                total_cost_usd=sum(cost for _, cost in bucket.values()),
+            )
+            for bucket_start, bucket in buckets.items()
+        ]
+        return RunSummaryResponse(period=period, interval=interval, points=points)
 
     async def get_pending_approval(self, thread_id: str) -> ApprovalRequest | None:
         """Reads the checkpointer directly -- the authoritative source for

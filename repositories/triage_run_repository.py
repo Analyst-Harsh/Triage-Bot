@@ -304,10 +304,17 @@ class TriageRunRepository:
         statuses: list[RunStatus] | None,
         repo_full_name: str | None,
         source: IssueSource | None,
+        started_after: datetime | None,
     ) -> ColumnElement[bool]:
         """Shared WHERE-clause construction for `list_runs`/`count_runs` --
         both must filter identically or a page's `total` could disagree
-        with the rows actually returned for it."""
+        with the rows actually returned for it.
+
+        `started_after` filters on `started_at`, not `updated_at` -- a
+        retried run's row keeps its original `started_at` (see this
+        module's docstring: `triage_runs` is a live-status projection, one
+        row per `thread_id`, not an append-only log), so this scopes to
+        *when the issue was first triaged*, not when its row last changed."""
         conditions: list[ColumnElement[bool]] = []
         if statuses is not None:
             conditions.append(TriageRun.status.in_([status.value for status in statuses]))
@@ -315,6 +322,8 @@ class TriageRunRepository:
             conditions.append(TriageRun.repo_full_name == repo_full_name)
         if source is not None:
             conditions.append(TriageRun.source == source.value)
+        if started_after is not None:
+            conditions.append(TriageRun.started_at >= started_after)
         return and_(*conditions) if conditions else and_(True)
 
     async def count_runs(
@@ -323,12 +332,18 @@ class TriageRunRepository:
         statuses: list[RunStatus] | None,
         repo_full_name: str | None,
         source: IssueSource | None,
+        started_after: datetime | None,
     ) -> int:
         stmt = (
             select(func.count())
             .select_from(TriageRun)
             .where(
-                self._list_filters(statuses=statuses, repo_full_name=repo_full_name, source=source)
+                self._list_filters(
+                    statuses=statuses,
+                    repo_full_name=repo_full_name,
+                    source=source,
+                    started_after=started_after,
+                )
             )
         )
         async with self._session_factory() as session:
@@ -340,13 +355,19 @@ class TriageRunRepository:
         statuses: list[RunStatus] | None,
         repo_full_name: str | None,
         source: IssueSource | None,
+        started_after: datetime | None,
         offset: int,
         limit: int,
     ) -> list[TriageRun]:
         stmt = (
             select(TriageRun)
             .where(
-                self._list_filters(statuses=statuses, repo_full_name=repo_full_name, source=source)
+                self._list_filters(
+                    statuses=statuses,
+                    repo_full_name=repo_full_name,
+                    source=source,
+                    started_after=started_after,
+                )
             )
             .order_by(TriageRun.updated_at.desc(), TriageRun.thread_id.desc())
             .offset(offset)
@@ -355,13 +376,49 @@ class TriageRunRepository:
         async with self._session_factory() as session:
             return list((await session.execute(stmt)).scalars().all())
 
-    async def count_by_status(self, *, repo_full_name: str | None = None) -> dict[str, int]:
-        stmt = select(TriageRun.status, func.count()).group_by(TriageRun.status)
+    async def get_status_breakdown(
+        self,
+        *,
+        since: datetime | None,
+        interval: str | None,
+        repo_full_name: str | None,
+    ) -> list[tuple[datetime | None, str, int, float]]:
+        """Status/cost breakdown backing `GET /runs/summary`. `interval=None`
+        collapses to today's flat per-status totals -- one row per status,
+        `bucket_start` is `None` on every returned row. Given an interval,
+        one row per (bucket, status) pair, ordered by bucket via Postgres
+        `func.date_trunc` so `TriageRunService` can group consecutive rows
+        without re-sorting. `interval` is bound as a query parameter through
+        `func.date_trunc`, never f-string-interpolated into raw SQL.
+        `estimated_cost_usd` is coalesced to 0.0 -- a bucket/status group
+        whose runs haven't accumulated any cost yet sums to SQL NULL
+        otherwise, and `TrendPoint.total_cost_usd` isn't optional."""
+        conditions: list[ColumnElement[bool]] = []
         if repo_full_name is not None:
-            stmt = stmt.where(TriageRun.repo_full_name == repo_full_name)
+            conditions.append(TriageRun.repo_full_name == repo_full_name)
+        if since is not None:
+            conditions.append(TriageRun.started_at >= since)
+        where_clause = and_(*conditions) if conditions else and_(True)
+        total_cost = func.coalesce(func.sum(TriageRun.estimated_cost_usd), 0.0)
+
         async with self._session_factory() as session:
+            if interval is None:
+                stmt = (
+                    select(TriageRun.status, func.count(), total_cost)
+                    .where(where_clause)
+                    .group_by(TriageRun.status)
+                )
+                rows = (await session.execute(stmt)).all()
+                return [(None, status, count, cost) for status, count, cost in rows]
+
+            bucket = func.date_trunc(interval, TriageRun.started_at)
+            stmt = (
+                select(bucket, TriageRun.status, func.count(), total_cost)
+                .where(where_clause)
+                .group_by(bucket, TriageRun.status)
+                .order_by(bucket)
+            )
             rows = (await session.execute(stmt)).all()
-        # dict(rows) trips pyright here -- SQLAlchemy's Row[tuple[str, int]]
-        # isn't recognized as assignable to dict()'s Iterable[tuple[_KT, _VT]]
-        # overload, so the comprehension form is kept despite ruff's C416.
-        return {status: count for status, count in rows}  # noqa: C416
+            return [
+                (bucket_start, status, count, cost) for bucket_start, status, count, cost in rows
+            ]

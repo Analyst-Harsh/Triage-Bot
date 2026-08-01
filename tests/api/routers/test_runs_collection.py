@@ -13,8 +13,9 @@ from api.routers.runs_collection import router
 from api.schemas.run_list_response import RunListResponse
 from api.schemas.run_summary import RunSummary
 from api.schemas.run_summary_response import RunSummaryResponse
+from api.schemas.trend_point import TrendPoint
 from config.settings import Settings, get_settings
-from graph.schemas import IssueSource, RunStatus
+from graph.schemas import IssueSource, RunStatus, TimeRangePeriod
 from services.triage_run_record import TriageRunRecord
 from tests.api._http import get
 
@@ -56,15 +57,17 @@ class _FakeService:
         self._list_runs_result = list_runs_result
         self._status_summary_result = status_summary_result
         self.list_runs_calls: list[dict[str, Any]] = []
-        self.get_status_summary_calls: list[str | None] = []
+        self.get_status_summary_calls: list[dict[str, Any]] = []
 
     async def list_runs(self, **kwargs: Any) -> RunListResponse:
         self.list_runs_calls.append(kwargs)
         assert self._list_runs_result is not None
         return self._list_runs_result
 
-    async def get_status_summary(self, *, repo_full_name: str | None = None) -> RunSummaryResponse:
-        self.get_status_summary_calls.append(repo_full_name)
+    async def get_status_summary(
+        self, *, repo_full_name: str | None = None, period: TimeRangePeriod | None = None
+    ) -> RunSummaryResponse:
+        self.get_status_summary_calls.append({"repo_full_name": repo_full_name, "period": period})
         assert self._status_summary_result is not None
         return self._status_summary_result
 
@@ -93,8 +96,16 @@ def make_list_response(**overrides: Any) -> RunListResponse:
 
 def make_summary_response(**overrides: Any) -> RunSummaryResponse:
     defaults: dict[str, Any] = {
-        "counts_by_status": dict.fromkeys(RunStatus, 0),
-        "total_runs": 0,
+        "period": None,
+        "interval": None,
+        "points": [
+            TrendPoint(
+                bucket_start=None,
+                counts_by_status=dict.fromkeys(RunStatus, 0),
+                run_count=0,
+                total_cost_usd=0.0,
+            )
+        ],
     }
     defaults.update(overrides)
     return RunSummaryResponse(**defaults)
@@ -127,7 +138,7 @@ def test_list_runs_passes_filters_and_pagination_through() -> None:
     response = get(
         client,
         "/runs?status=failed&status=pending_approval&repo_full_name=octo/repo"
-        "&source=webhook&page=2&page_size=10",
+        "&source=webhook&period=24h&page=2&page_size=10",
         headers=AUTH_HEADERS,
     )
 
@@ -139,6 +150,7 @@ def test_list_runs_passes_filters_and_pagination_through() -> None:
             "statuses": [RunStatus.FAILED, RunStatus.PENDING_APPROVAL],
             "repo_full_name": "octo/repo",
             "source": IssueSource.WEBHOOK,
+            "period": TimeRangePeriod.TWENTY_FOUR_HOURS,
         }
     ]
 
@@ -156,8 +168,18 @@ def test_list_runs_defaults_page_and_page_size() -> None:
             "statuses": None,
             "repo_full_name": None,
             "source": None,
+            "period": None,
         }
     ]
+
+
+def test_list_runs_rejects_invalid_period_value() -> None:
+    service = _FakeService(list_runs_result=make_list_response())
+    client = TestClient(make_app(service))
+
+    response = get(client, "/runs?period=90d", headers=AUTH_HEADERS)
+
+    assert response.status_code == 422
 
 
 def test_list_runs_rejects_page_size_above_cap() -> None:
@@ -175,10 +197,16 @@ def test_get_runs_summary_requires_bearer_token() -> None:
     assert response.status_code == 401
 
 
-def test_get_runs_summary_returns_counts() -> None:
+def test_get_runs_summary_returns_points() -> None:
     result = make_summary_response(
-        counts_by_status={**dict.fromkeys(RunStatus, 0), RunStatus.FAILED: 3},
-        total_runs=3,
+        points=[
+            TrendPoint(
+                bucket_start=None,
+                counts_by_status={**dict.fromkeys(RunStatus, 0), RunStatus.FAILED: 3},
+                run_count=3,
+                total_cost_usd=1.5,
+            )
+        ]
     )
     service = _FakeService(status_summary_result=result)
     client = TestClient(make_app(service))
@@ -187,14 +215,40 @@ def test_get_runs_summary_returns_counts() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["counts_by_status"]["failed"] == 3
-    assert body["total_runs"] == 3
+    assert len(body["points"]) == 1
+    assert body["points"][0]["counts_by_status"]["failed"] == 3
+    assert body["points"][0]["run_count"] == 3
+    assert body["points"][0]["total_cost_usd"] == 1.5
 
 
-def test_get_runs_summary_passes_repo_filter_through() -> None:
+def test_get_runs_summary_passes_repo_filter_and_period_through() -> None:
     service = _FakeService(status_summary_result=make_summary_response())
     client = TestClient(make_app(service))
 
-    get(client, "/runs/summary?repo_full_name=octo/repo", headers=AUTH_HEADERS)
+    get(
+        client,
+        "/runs/summary?repo_full_name=octo/repo&period=7d",
+        headers=AUTH_HEADERS,
+    )
 
-    assert service.get_status_summary_calls == ["octo/repo"]
+    assert service.get_status_summary_calls == [
+        {"repo_full_name": "octo/repo", "period": TimeRangePeriod.SEVEN_DAYS}
+    ]
+
+
+def test_get_runs_summary_defaults_period_to_none() -> None:
+    service = _FakeService(status_summary_result=make_summary_response())
+    client = TestClient(make_app(service))
+
+    get(client, "/runs/summary", headers=AUTH_HEADERS)
+
+    assert service.get_status_summary_calls == [{"repo_full_name": None, "period": None}]
+
+
+def test_get_runs_summary_rejects_invalid_period_value() -> None:
+    service = _FakeService(status_summary_result=make_summary_response())
+    client = TestClient(make_app(service))
+
+    response = get(client, "/runs/summary?period=90d", headers=AUTH_HEADERS)
+
+    assert response.status_code == 422

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 
 from api.dependencies import RunServiceDep, require_bearer_token
 from api.schemas import RunListResponse, RunSummaryResponse
-from graph.schemas import IssueSource, RunStatus
+from graph.schemas import IssueSource, RunStatus, TimeRangePeriod
 
 router = APIRouter(prefix="/runs", tags=["runs"], dependencies=[Depends(require_bearer_token)])
 
@@ -20,6 +20,7 @@ async def list_runs(
     status: Annotated[list[RunStatus] | None, Query()] = None,
     repo_full_name: Annotated[str | None, Query()] = None,
     source: Annotated[IssueSource | None, Query()] = None,
+    period: Annotated[TimeRangePeriod | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> RunListResponse:
@@ -29,6 +30,7 @@ async def list_runs(
         statuses=status,
         repo_full_name=repo_full_name,
         source=source,
+        period=period,
     )
 
 
@@ -36,5 +38,6 @@ async def list_runs(
 async def get_runs_summary(
     service: RunServiceDep,
     repo_full_name: Annotated[str | None, Query()] = None,
+    period: Annotated[TimeRangePeriod | None, Query()] = None,
 ) -> RunSummaryResponse:
-    return await service.get_status_summary(repo_full_name=repo_full_name)
+    return await service.get_status_summary(repo_full_name=repo_full_name, period=period)

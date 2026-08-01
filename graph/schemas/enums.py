@@ -63,3 +63,10 @@ class ResearchToolName(StrEnum):
     DOCMIND = "docmind"
     GITHUB = "github"
     WEB = "web"
+
+
+class TimeRangePeriod(StrEnum):
+    ONE_HOUR = "1h"
+    TWENTY_FOUR_HOURS = "24h"
+    SEVEN_DAYS = "7d"
+    THIRTY_DAYS = "30d"
