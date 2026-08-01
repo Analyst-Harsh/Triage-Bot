@@ -9,10 +9,10 @@
 | api/dependencies.py                              |       30 |        1 |     97% |        61 |
 | api/errors.py                                    |        6 |        0 |    100% |           |
 | api/routers/\_\_init\_\_.py                      |        0 |        0 |    100% |           |
-| api/routers/runs.py                              |       79 |        2 |     97% |   116-117 |
+| api/routers/runs.py                              |       91 |        2 |     98% |   136-137 |
 | api/routers/runs\_collection.py                  |       12 |        0 |    100% |           |
 | api/routers/webhooks.py                          |       41 |        0 |    100% |           |
-| api/schemas/\_\_init\_\_.py                      |       10 |        0 |    100% |           |
+| api/schemas/\_\_init\_\_.py                      |       13 |        0 |    100% |           |
 | api/schemas/detail\_response.py                  |        2 |        0 |    100% |           |
 | api/schemas/error\_detail.py                     |        5 |        0 |    100% |           |
 | api/schemas/github\_webhook.py                   |       15 |        0 |    100% |           |
@@ -21,7 +21,10 @@
 | api/schemas/run\_detail\_response.py             |        4 |        0 |    100% |           |
 | api/schemas/run\_list\_response.py               |        3 |        0 |    100% |           |
 | api/schemas/run\_summary.py                      |       27 |        0 |    100% |           |
-| api/schemas/run\_summary\_response.py            |        3 |        0 |    100% |           |
+| api/schemas/run\_summary\_response.py            |        5 |        0 |    100% |           |
+| api/schemas/trace\_observation.py                |        3 |        0 |    100% |           |
+| api/schemas/trace\_summary\_response.py          |        3 |        0 |    100% |           |
+| api/schemas/trend\_point.py                      |        4 |        0 |    100% |           |
 | config/\_\_init\_\_.py                           |        2 |        0 |    100% |           |
 | config/guardrail\_settings.py                    |       20 |        0 |    100% |           |
 | config/settings.py                               |       35 |        0 |    100% |           |
@@ -58,7 +61,7 @@
 | graph/schemas/approval\_request.py               |       17 |        0 |    100% |           |
 | graph/schemas/base.py                            |        3 |        0 |    100% |           |
 | graph/schemas/draft.py                           |       13 |        0 |    100% |           |
-| graph/schemas/enums.py                           |       45 |        0 |    100% |           |
+| graph/schemas/enums.py                           |       50 |        0 |    100% |           |
 | graph/schemas/episode.py                         |        9 |        0 |    100% |           |
 | graph/schemas/grounding.py                       |        4 |        0 |    100% |           |
 | graph/schemas/issue.py                           |        8 |        0 |    100% |           |
@@ -78,10 +81,12 @@
 | llm/structured.py                                |       42 |        1 |     98% |        67 |
 | main.py                                          |       85 |       32 |     62% |52-55, 70-76, 126-215, 224 |
 | models/\_\_init\_\_.py                           |        2 |        0 |    100% |           |
-| models/base.py                                   |        2 |        0 |    100% |           |
+| models/base.py                                   |        6 |        0 |    100% |           |
 | models/triage\_run.py                            |       12 |        0 |    100% |           |
 | observability/\_\_init\_\_.py                    |        0 |        0 |    100% |           |
+| observability/langfuse\_reader.py                |       21 |       15 |     29% |25-32, 65-79 |
 | observability/logging\_config.py                 |       21 |        0 |    100% |           |
+| observability/trace\_reader.py                   |       21 |        1 |     95% |        22 |
 | observability/tracing.py                         |       38 |        7 |     82% |154-168, 189-190 |
 | prompts/\_\_init\_\_.py                          |        2 |        0 |    100% |           |
 | prompts/drafter.py                               |       80 |        0 |    100% |           |
@@ -89,11 +94,12 @@
 | prompts/researcher.py                            |       11 |        0 |    100% |           |
 | prompts/risk\_check.py                           |       17 |        0 |    100% |           |
 | repositories/\_\_init\_\_.py                     |        2 |        0 |    100% |           |
-| repositories/triage\_run\_repository.py          |       91 |        0 |    100% |           |
+| repositories/triage\_run\_repository.py          |      103 |        0 |    100% |           |
 | services/\_\_init\_\_.py                         |        3 |        0 |    100% |           |
-| services/errors.py                               |       51 |        0 |    100% |           |
+| services/errors.py                               |       65 |        0 |    100% |           |
+| services/time\_range\_resolver.py                |       14 |        0 |    100% |           |
 | services/triage\_run\_record.py                  |        7 |        0 |    100% |           |
-| services/triage\_run\_service.py                 |      144 |        3 |     98% |261, 273-278 |
+| services/triage\_run\_service.py                 |      175 |        3 |     98% |346, 358-363 |
 | tools/\_\_init\_\_.py                            |        0 |        0 |    100% |           |
 | tools/mcp\_clients.py                            |       50 |        9 |     82% |   102-110 |
 | tools/sandbox.py                                 |      393 |       17 |     96% |110-111, 113, 203, 439, 484-486, 510-511, 635-642, 971, 974, 977, 982, 985 |
@@ -102,7 +108,7 @@
 | utils/episodic\_memory\_store.py                 |       68 |       10 |     85% |68, 82, 230-248 |
 | utils/github\_client.py                          |       71 |        1 |     99% |       148 |
 | utils/postgres\_pool.py                          |       12 |        0 |    100% |           |
-| **TOTAL**                                        | **2817** |  **123** | **96%** |           |
+| **TOTAL**                                        | **2966** |  **139** | **95%** |           |
 
 
 ## Setup coverage badge
