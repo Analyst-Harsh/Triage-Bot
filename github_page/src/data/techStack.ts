@@ -11,4 +11,5 @@ export const TECH_STACK: TechCategory[] = [
   { label: 'Database', items: ['Postgres', 'pgvector', 'SQLAlchemy'] },
   { label: 'Observability', items: ['OpenTelemetry', 'Langfuse', 'structlog'] },
   { label: 'Quality', items: ['pytest', 'pyright', 'ruff', 'uv'] },
+  { label: 'Dashboard', items: ['Next.js', 'TypeScript'] },
 ]

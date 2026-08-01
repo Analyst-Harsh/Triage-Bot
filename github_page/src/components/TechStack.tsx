@@ -1,12 +1,22 @@
 import { useRef, type ComponentType } from 'react'
 import { useGSAP } from '@gsap/react'
-import { Activity, CheckCircle2, Database, Server, Sparkles, Workflow, Wrench } from 'lucide-react'
+import {
+  Activity,
+  CheckCircle2,
+  Database,
+  LayoutDashboard,
+  Server,
+  Sparkles,
+  Workflow,
+  Wrench,
+} from 'lucide-react'
 import {
   SiAnthropic,
   SiFastapi,
   SiLangchain,
   SiLanggraph,
   SiModelcontextprotocol,
+  SiNextdotjs,
   SiOpentelemetry,
   SiPostgresql,
   SiPydantic,
@@ -33,6 +43,7 @@ const ITEM_ICONS: Partial<Record<string, IconComponent>> = {
   pytest: SiPytest,
   ruff: SiRuff,
   uv: SiUv,
+  'Next.js': SiNextdotjs,
 }
 
 const CATEGORY_FALLBACK_ICONS: Record<string, IconComponent> = {
@@ -43,6 +54,7 @@ const CATEGORY_FALLBACK_ICONS: Record<string, IconComponent> = {
   Database: Database,
   Observability: Activity,
   Quality: CheckCircle2,
+  Dashboard: LayoutDashboard,
 }
 
 export function TechStack() {

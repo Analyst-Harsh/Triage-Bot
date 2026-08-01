@@ -18,7 +18,7 @@
 
 A production-grade [LangGraph](https://github.com/langchain-ai/langgraph) agent that triages GitHub issues end to end. A live webhook and a replay pipeline of backfilled OSS issues both feed the same graph — **Planner → Researcher → Drafter → Risk check → Auto-post/Approval queue** — with every outcome logged to episodic memory, checkpointed via Postgres, and traced via Langfuse's OpenTelemetry-based SDK.
 
-Every node in that pipeline is implemented, tested, and has opened real pull requests and comments against a live test repo. The FastAPI operator API (`api/`) — webhook ingestion, approval resume, run tracking — is production-ready, not a stub. There is no live ops-dashboard UI yet; what *is* live is a marketing/portfolio site (below) describing the system.
+Every node in that pipeline is implemented, tested, and has opened real pull requests and comments against a live test repo. The FastAPI operator API (`api/`) — webhook ingestion, approval resume, run tracking — is production-ready, not a stub, and a Next.js operator dashboard (`dashboard/`) now consumes it. Separately, a marketing/portfolio site (below) describes the system for visitors who aren't triaging issues.
 
 **Why this repo is worth a closer look:** cross-provider trajectory evals (an Anthropic judge grades an OpenAI-run agent, on purpose) · a checkpointed human-in-the-loop approval flow built on LangGraph's native `interrupt()` primitive · pgvector-backed episodic memory that makes the Planner's second month of decisions better-informed than its first day · a discriminated-union action schema that structurally defends against prompt injection · six real adversarial issues red-teamed against the OWASP LLM Top 10.
 
@@ -36,6 +36,7 @@ Every node in that pipeline is implemented, tested, and has opened real pull req
 - [Security and OWASP Red Teaming](#security-and-owasp-red-teaming)
 - [Observability](#observability)
 - [Dashboard API](#dashboard-api)
+- [Operator Dashboard](#operator-dashboard)
 - [Marketing and Portfolio Site](#marketing-and-portfolio-site)
 - [Tech Stack](#tech-stack)
 - [Quickstart](#quickstart)
@@ -225,7 +226,11 @@ A FastAPI operator API (`api/`) is fully implemented and tested — this is *not
 | `GET /runs/{owner}/{repo}/{issue}` | Run detail |
 | `GET /runs/summary` | Status-summary counts |
 
-`/runs/*` routes require a bearer token; the webhook route is authenticated separately by its HMAC signature. **No live dashboard UI exists yet** — the only UI-shaped artifact today is the marketing site below, whose dashboard mockup is an explicitly illustrative concept image, not a real screenshot.
+`/runs/*` routes require a bearer token; the webhook route is authenticated separately by its HMAC signature.
+
+## Operator Dashboard
+
+[`dashboard/`](dashboard/) is a Next.js 16 (App Router) app consuming the read side of the API above: an overview page (stat cards, status distribution, a filterable/paginated runs table, a system-health panel) and a per-run detail page (planner/research/draft sections, a diff viewer, risk and post-results, episodic-memory hits, an embedded Langfuse trace summary, and an approve/reject panel for paused runs). Server Components fetch FastAPI directly server-to-server, so the bearer token never reaches the browser; Client Components go through same-origin Next.js Route Handlers instead. It runs locally today — see [`dashboard/README.md`](dashboard/README.md) for commands and configuration — and is distinct from the marketing site below, whose dashboard visual is an illustrative mockup, not a screenshot of this app.
 
 ## Marketing and Portfolio Site
 
@@ -241,6 +246,7 @@ A FastAPI operator API (`api/`) is fully implemented and tested — this is *not
 **Observability** — Langfuse (OpenTelemetry-based SDK), structlog
 **Quality** — pytest (+asyncio, +cov), pyright (strict, whole project), ruff (incl. bandit `S` rules), detect-secrets, pip-audit, `uv`, lefthook
 **Frontend** (`github_page/`) — React 19, Vite, TypeScript, Three.js / `@react-three/fiber`, GSAP, Tailwind v4
+**Dashboard** (`dashboard/`) — Next.js 16, React 19, TypeScript, TanStack Query/Table, Tailwind v4, Vitest
 
 ## Quickstart
 
@@ -267,6 +273,7 @@ docker compose up -d           # starts local pgvector-enabled Postgres + Admine
 ## Continuous Integration and Deployment
 
 - **`bi_frost.yml`** — on every PR and push to `main`: `ruff format --check`, `ruff check`, `pyright` (strict), `detect-secrets`, then `pytest` with coverage, posting a coverage comment on the PR.
+- **`heimdall.yml`** — on every PR and push to `main` touching `dashboard/**`: `eslint`, `tsc --noEmit`, `vitest run`.
 - **`deploy-pages.yml`** — on push to `main` touching `github_page/**`: builds the Vite site and deploys it to GitHub Pages.
 
 ## Documentation
@@ -279,6 +286,7 @@ docker compose up -d           # starts local pgvector-enabled Postgres + Admine
 | **Design-pattern rationale** | [`docs/agent/engineering-standards.md`](docs/agent/engineering-standards.md) |
 | **State schema & module conventions** | [`docs/agent/architecture-conventions.md`](docs/agent/architecture-conventions.md) |
 | **Eval suite: data flow, grading, scope** | [`docs/agent/evals.md`](docs/agent/evals.md) |
+| **Operator dashboard: run, build, architecture** | [`dashboard/README.md`](dashboard/README.md) |
 | **Marketing/portfolio site: run, build, deploy** | [`github_page/README.md`](github_page/README.md) |
 | **Reporting a vulnerability** | [`SECURITY.md`](SECURITY.md) |
 
