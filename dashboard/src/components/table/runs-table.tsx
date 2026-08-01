@@ -7,9 +7,10 @@ import { useRouter } from "next/navigation";
 import type { MouseEvent } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { components } from "@/lib/api/schema";
-import { formatCost, formatDuration, formatRelativeTime } from "@/lib/format";
+import { formatCost, formatDuration } from "@/lib/format";
 import { splitRepoFullName } from "@/lib/repo-full-name";
 import { useReducedMotion } from "@/lib/useReducedMotion";
+import { RelativeTime } from "./relative-time";
 import { StatusBadge } from "./status-badge";
 
 type RunSummary = components["schemas"]["RunSummary"];
@@ -100,7 +101,7 @@ const columns: ColumnDef<RunSummary>[] = [
     header: "Started At",
     cell: ({ row }) => (
       <span className="block truncate text-xs text-muted-foreground">
-        {formatRelativeTime(row.original.started_at)}
+        <RelativeTime isoDate={row.original.started_at} />
       </span>
     ),
   },
