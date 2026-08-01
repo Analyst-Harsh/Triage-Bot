@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import type { components } from "@/lib/api/schema";
 import { useRetryMutation } from "@/lib/query/hooks";
 import { highestRiskLevel } from "@/lib/risk-summary";
+import { cn } from "@/lib/utils";
 
 type RunDetailResponse = components["schemas"]["RunDetailResponse"];
 
@@ -54,7 +55,10 @@ export function RunHeader({
               disabled={retryMutation.isPending}
               onClick={() => retryMutation.mutate({})}
             >
-              <RotateCw className="size-3.5" aria-hidden />
+              <RotateCw
+                className={cn("size-3.5", retryMutation.isPending && "animate-spin")}
+                aria-hidden
+              />
               {retryMutation.isPending ? "Retrying…" : "Retry"}
             </Button>
           )}

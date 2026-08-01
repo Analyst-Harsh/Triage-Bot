@@ -1,5 +1,6 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { RiskBadge } from "@/components/table/risk-badge";
 import { Badge } from "@/components/ui/badge";
@@ -107,7 +108,7 @@ export function ApprovalPanel({
 
   if (pendingQuery.isPending) {
     return (
-      <SectionCard title="Approval">
+      <SectionCard title="Approval" defaultOpen>
         <Skeleton className="h-32 w-full" />
       </SectionCard>
     );
@@ -115,7 +116,7 @@ export function ApprovalPanel({
 
   if (pendingQuery.isError || !pendingQuery.data) {
     return (
-      <SectionCard title="Approval" emptyLabel="Nothing pending approval.">
+      <SectionCard title="Approval" emptyLabel="Nothing pending approval." defaultOpen>
         {null}
       </SectionCard>
     );
@@ -129,7 +130,7 @@ export function ApprovalPanel({
   const allDecided = actions.every((action) => decisions[action.index] !== undefined);
 
   return (
-    <SectionCard title="Approval">
+    <SectionCard title="Approval" defaultOpen>
       <div className="space-y-3">
         {actions.map((action) => (
           <QueuedActionRow
@@ -164,6 +165,9 @@ export function ApprovalPanel({
             })
           }
         >
+          {approvalMutation.isPending && (
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          )}
           {approvalMutation.isPending ? "Submitting…" : "Submit decisions"}
         </Button>
         {!allDecided && (

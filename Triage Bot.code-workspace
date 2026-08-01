@@ -7,7 +7,21 @@
 		{
 			"name": "website",
 			"path": "github_page"
+		},
+		{
+			"name": "dashboard",
+			"path": "dashboard"
+		},
+		{
+			"name": "docs",
+			"path": "docs"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"files.exclude": {
+			"github_page": true,
+			"dashboard": true,
+			"docs": true
+		}
+	}
 }

@@ -32,7 +32,7 @@ function DiffLineRow({ line }: { line: DiffLine }) {
 function PlainDiff({ lines }: { lines: DiffLine[] }) {
   return (
     <div
-      className="overflow-y-auto rounded-lg bg-card ring-1 ring-foreground/10"
+      className="overflow-x-auto overflow-y-auto rounded-lg bg-card ring-1 ring-foreground/10"
       style={{ maxHeight: VIEWPORT_HEIGHT_PX }}
     >
       {lines.map((line, index) => (
@@ -54,7 +54,7 @@ function VirtualizedDiff({ lines }: { lines: DiffLine[] }) {
   return (
     <div
       ref={parentRef}
-      className="overflow-y-auto rounded-lg bg-card ring-1 ring-foreground/10"
+      className="overflow-x-auto overflow-y-auto rounded-lg bg-card ring-1 ring-foreground/10"
       style={{ height: VIEWPORT_HEIGHT_PX }}
     >
       <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>

@@ -18,9 +18,18 @@ export type RunsListFilters = {
 
 export const queryKeys = {
   runs: (filters: RunsListFilters) => ["runs", filters] as const,
+  /** Prefix of every `runs(filters)` key, regardless of filters -- pass to
+   * `invalidateQueries` (which matches by key prefix) to refresh the
+   * Overview table after a mutation without needing to know its current
+   * filters/page. */
+  allRuns: () => ["runs"] as const,
   summary: (period: string | undefined, repoFullName: string | undefined) =>
     ["runs-summary", period, repoFullName] as const,
   liveHealthSummary: () => ["runs-summary", "all-time"] as const,
+  /** Prefix shared by both `summary(...)` and `liveHealthSummary()` -- one
+   * `invalidateQueries` call refreshes the stat cards and the sidebar
+   * health panel together. */
+  allSummaries: () => ["runs-summary"] as const,
   runDetail: (owner: string, repo: string, issueNumber: number) =>
     ["run-detail", owner, repo, issueNumber] as const,
   pendingApproval: (owner: string, repo: string, issueNumber: number) =>

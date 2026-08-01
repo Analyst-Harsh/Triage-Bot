@@ -3,8 +3,14 @@ name: BiFrost
 on:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "dashboard/**"
+      - "github_page/**"
   push:
     branches: [main]
+    paths-ignore:
+      - "dashboard/**"
+      - "github_page/**"
   workflow_dispatch:
 
 concurrency:

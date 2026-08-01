@@ -13,3 +13,4 @@ htmlcov/
 *.db-shm
 /results/
 /evals/.cache/
+.playwright-mcp*

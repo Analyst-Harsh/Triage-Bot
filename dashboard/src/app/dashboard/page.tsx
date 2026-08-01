@@ -1,8 +1,6 @@
 import { HydrationBoundary, dehydrate } from "@tanstack/react-query";
-import { Suspense } from "react";
 import { OverviewContent } from "@/components/dashboard/overview-content";
 import { Sidebar } from "@/components/layout/sidebar";
-import { RunsTableSkeleton } from "@/components/table/runs-table-skeleton";
 import type { components } from "@/lib/api/schema";
 import { TriageApiClient } from "@/lib/api/triage-client";
 import type { Query } from "@/lib/api/triage-client";
@@ -84,14 +82,19 @@ export default async function DashboardOverviewPage({
   const initialHealthSummary = queryClient.getQueryData<RunSummaryResponse>(
     queryKeys.liveHealthSummary(),
   );
+  // Same cross-tree hydration timing bug `Sidebar`/`initialHealthSummary`
+  // works around above -- `StatCardsRow` and `StatusDistributionBar` render
+  // their loading skeleton on first paint despite this prefetch unless the
+  // data is threaded down explicitly too.
+  const initialSummary = queryClient.getQueryData<RunSummaryResponse>(
+    queryKeys.summary(filters.period, undefined),
+  );
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
       <div className="flex min-h-screen">
         <Sidebar initialHealthSummary={initialHealthSummary} />
-        <Suspense fallback={<RunsTableSkeleton />}>
-          <OverviewContent />
-        </Suspense>
+        <OverviewContent initialSummary={initialSummary} />
       </div>
     </HydrationBoundary>
   );

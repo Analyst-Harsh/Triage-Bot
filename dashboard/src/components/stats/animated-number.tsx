@@ -19,12 +19,12 @@ export function AnimatedNumber({
   className,
 }: {
   value: number;
-  format: (rounded: number) => string;
+  format: (value: number) => string;
   className?: string;
 }) {
   const reducedMotion = useReducedMotion();
   const motionValue = useMotionValue(value);
-  const display = useTransform(motionValue, (latest) => format(Math.round(latest)));
+  const display = useTransform(motionValue, (latest) => format(latest));
 
   useEffect(() => {
     if (reducedMotion) {

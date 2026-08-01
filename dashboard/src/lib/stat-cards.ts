@@ -40,7 +40,7 @@ export function deriveStatCards(summary: RunSummaryResponse): StatCardData[] {
     },
     {
       key: "auto_posted",
-      label: "Auto-Posted",
+      label: "Posted",
       total: points.reduce((sum, p) => sum + bucketStatusCount(p, SUCCESS_STATUSES), 0),
       sparkline: points.map((p) => bucketStatusCount(p, SUCCESS_STATUSES)),
       isCurrency: false,

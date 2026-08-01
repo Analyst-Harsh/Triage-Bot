@@ -56,26 +56,32 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Softened from near-black (#020617) to a lighter slate-900 base -- pure
+   near-black + pure #f8fafc foreground read as harsh/OLED-mode; this keeps
+   the same navy family but with less contrast punch, easier for a dashboard
+   an operator has open all day. Status/risk tokens below are unchanged --
+   they're validated against the RunStatus mapping this palette exists to
+   support, not part of the "too dark" complaint. */
 :root,
 .dark {
-  --background: #020617;
-  --foreground: #f8fafc;
-  --card: #0e1223;
-  --card-foreground: #f8fafc;
-  --popover: #0e1223;
-  --popover-foreground: #f8fafc;
+  --background: #0f172a;
+  --foreground: #eaeef6;
+  --card: #161d33;
+  --card-foreground: #eaeef6;
+  --popover: #161d33;
+  --popover-foreground: #eaeef6;
   --primary: #6366f1;
   --primary-foreground: #ffffff;
-  --secondary: #1e293b;
-  --secondary-foreground: #f8fafc;
-  --muted: #1e293b;
-  --muted-foreground: #94a3b8;
-  --accent: #1e293b;
-  --accent-foreground: #f8fafc;
+  --secondary: #1e2a47;
+  --secondary-foreground: #eaeef6;
+  --muted: #1e2a47;
+  --muted-foreground: #9aa8c3;
+  --accent: #232f4e;
+  --accent-foreground: #eaeef6;
   --destructive: #ef4444;
-  --border: #1e293b;
-  --border-strong: #334155;
-  --input: #1e293b;
+  --border: #263353;
+  --border-strong: #3b4a73;
+  --input: #1e2a47;
   --ring: #6366f1;
   --success: #22c55e;
   --warning: #f59e0b;
@@ -83,13 +89,13 @@
   --neutral: #64748b;
   --info: #06b6d4;
   --radius: 0.5rem;
-  --sidebar: #0e1223;
-  --sidebar-foreground: #f8fafc;
+  --sidebar: #161d33;
+  --sidebar-foreground: #eaeef6;
   --sidebar-primary: #6366f1;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #1e293b;
-  --sidebar-accent-foreground: #f8fafc;
-  --sidebar-border: #1e293b;
+  --sidebar-accent: #1e2a47;
+  --sidebar-accent-foreground: #eaeef6;
+  --sidebar-border: #263353;
   --sidebar-ring: #6366f1;
 }
 

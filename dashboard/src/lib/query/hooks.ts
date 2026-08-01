@@ -36,14 +36,24 @@ export function useRunsQuery(filters: RunsListFilters) {
   });
 }
 
-/** Overview page: stat cards + sparklines, scoped to the selected period. */
-export function useRunsSummaryQuery(period: string | undefined, repoFullName?: string) {
+/** Overview page: stat cards + sparklines, scoped to the selected period.
+ * `initialData` mirrors `useLiveHealthSummaryQuery`/`useRunDetailQuery`'s
+ * pattern -- threaded explicitly from the Server Component's own prefetch,
+ * the same cross-tree hydration timing fix, since `StatCardsRow` and
+ * `StatusDistributionBar` otherwise render their loading state on first
+ * paint despite `page.tsx` already having this data. */
+export function useRunsSummaryQuery(
+  period: string | undefined,
+  repoFullName?: string,
+  initialData?: RunSummaryResponse,
+) {
   return useQuery({
     queryKey: queryKeys.summary(period, repoFullName),
     queryFn: () =>
       fetchJson<RunSummaryResponse>(
         buildRunsUrl("/api/runs/summary", { period, repo_full_name: repoFullName }),
       ),
+    initialData,
     refetchInterval: 10_000,
     refetchIntervalInBackground: false,
   });
@@ -137,6 +147,11 @@ export function useApprovalMutation(owner: string, repo: string, issueNumber: nu
       void queryClient.invalidateQueries({
         queryKey: queryKeys.pendingApproval(owner, repo, issueNumber),
       });
+      // A decision changes this run's status, which the Overview table,
+      // stat cards, and sidebar health panel all reflect -- refresh them
+      // now rather than waiting for their own 10s poll.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allRuns() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allSummaries() });
     },
   });
 }
@@ -150,6 +165,8 @@ export function useRetryMutation(owner: string, repo: string, issueNumber: numbe
       void queryClient.invalidateQueries({
         queryKey: queryKeys.runDetail(owner, repo, issueNumber),
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allRuns() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allSummaries() });
     },
   });
 }

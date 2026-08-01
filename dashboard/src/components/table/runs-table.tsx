@@ -3,6 +3,8 @@
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { motion } from "motion/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { MouseEvent } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { components } from "@/lib/api/schema";
 import { formatCost, formatDuration, formatRelativeTime } from "@/lib/format";
@@ -17,6 +19,22 @@ function runDetailHref(run: RunSummary): string {
   return `/dashboard/runs/${owner}/${repo}/${run.issue_number}`;
 }
 
+/**
+ * `<Table>` is `table-layout: fixed` -- explicit per-column widths here (all
+ * but "issue", which takes whatever's left) are what makes that work. Auto
+ * table layout sized columns off content instead, which let the row wider
+ * than its `overflow-x-auto` container whenever a repo name/thread id was
+ * long enough, flashing a horizontal scrollbar on mount.
+ */
+const COLUMN_WIDTHS: Record<string, string> = {
+  run: "w-36",
+  repo_full_name: "w-40",
+  status: "w-44",
+  estimated_cost_usd: "w-20",
+  duration_seconds: "w-20",
+  started_at: "w-24",
+};
+
 const columns: ColumnDef<RunSummary>[] = [
   {
     id: "run",
@@ -24,7 +42,8 @@ const columns: ColumnDef<RunSummary>[] = [
     cell: ({ row }) => (
       <Link
         href={runDetailHref(row.original)}
-        className="font-mono text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        className="block truncate font-mono text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        title={row.original.thread_id}
       >
         {row.original.thread_id}
       </Link>
@@ -33,13 +52,21 @@ const columns: ColumnDef<RunSummary>[] = [
   {
     accessorKey: "repo_full_name",
     header: "Repository",
-    cell: ({ row }) => <span className="text-sm">{row.original.repo_full_name}</span>,
+    cell: ({ row }) => (
+      <span className="block truncate text-sm" title={row.original.repo_full_name}>
+        {row.original.repo_full_name}
+      </span>
+    ),
   },
   {
     id: "issue",
     header: "Issue / Title",
     cell: ({ row }) => (
-      <Link href={runDetailHref(row.original)} className="text-sm hover:underline">
+      <Link
+        href={runDetailHref(row.original)}
+        className="block truncate text-sm hover:underline"
+        title={row.original.issue_title}
+      >
         <span className="text-muted-foreground">#{row.original.issue_number}</span>{" "}
         {row.original.issue_title}
       </Link>
@@ -54,21 +81,25 @@ const columns: ColumnDef<RunSummary>[] = [
     accessorKey: "estimated_cost_usd",
     header: "Est. Cost",
     cell: ({ row }) => (
-      <span className="font-mono text-xs">{formatCost(row.original.estimated_cost_usd)}</span>
+      <span className="block truncate font-mono text-xs">
+        {formatCost(row.original.estimated_cost_usd)}
+      </span>
     ),
   },
   {
     accessorKey: "duration_seconds",
     header: "Duration",
     cell: ({ row }) => (
-      <span className="font-mono text-xs">{formatDuration(row.original.duration_seconds)}</span>
+      <span className="block truncate font-mono text-xs">
+        {formatDuration(row.original.duration_seconds)}
+      </span>
     ),
   },
   {
     accessorKey: "started_at",
     header: "Started At",
     cell: ({ row }) => (
-      <span className="text-xs text-muted-foreground">
+      <span className="block truncate text-xs text-muted-foreground">
         {formatRelativeTime(row.original.started_at)}
       </span>
     ),
@@ -93,6 +124,7 @@ export function RunsTableEmptyState() {
  */
 export function RunsTable({ runs, animationKey }: { runs: RunSummary[]; animationKey: string }) {
   const reducedMotion = useReducedMotion();
+  const router = useRouter();
   const table = useReactTable({ data: runs, columns, getCoreRowModel: getCoreRowModel() });
 
   if (runs.length === 0) {
@@ -105,7 +137,7 @@ export function RunsTable({ runs, animationKey }: { runs: RunSummary[]; animatio
         {table.getHeaderGroups().map((headerGroup) => (
           <TableRow key={headerGroup.id}>
             {headerGroup.headers.map((header) => (
-              <TableHead key={header.id}>
+              <TableHead key={header.id} className={COLUMN_WIDTHS[header.column.id]}>
                 {header.isPlaceholder
                   ? null
                   : flexRender(header.column.columnDef.header, header.getContext())}
@@ -118,7 +150,13 @@ export function RunsTable({ runs, animationKey }: { runs: RunSummary[]; animatio
         {table.getRowModel().rows.map((row, index) => (
           <motion.tr
             key={row.id}
-            className="border-b border-border transition-colors hover:bg-muted/50"
+            className="cursor-pointer border-b border-border transition-colors hover:bg-muted/50"
+            onClick={(event: MouseEvent<HTMLTableRowElement>) => {
+              // Real <Link>s in this row (Run, Issue) keep native click/middle-click/cmd-click
+              // behavior -- only take over the click when it didn't originate on one of them.
+              if ((event.target as HTMLElement).closest("a")) return;
+              router.push(runDetailHref(row.original));
+            }}
             initial={reducedMotion ? false : { opacity: 0, y: 16, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{

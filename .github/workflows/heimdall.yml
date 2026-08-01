@@ -1,15 +1,15 @@
-name: Dashboard CI
+name: Heimdall
 
 on:
   push:
     branches: [main]
     paths:
       - "dashboard/**"
-      - ".github/workflows/dashboard-ci.yml"
+      - ".github/workflows/heimdall.yml"
   pull_request:
     paths:
       - "dashboard/**"
-      - ".github/workflows/dashboard-ci.yml"
+      - ".github/workflows/heimdall.yml"
 
 permissions:
   contents: read
@@ -45,5 +45,6 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build
-        run: npm run build
+        # Build when we deploy
+      # - name: Build
+      #   run: npm run build

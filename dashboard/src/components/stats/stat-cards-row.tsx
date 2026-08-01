@@ -3,11 +3,14 @@
 import { CheckCircle2, Clock, DollarSign, XCircle } from "lucide-react";
 import { motion } from "motion/react";
 import type { LucideIcon } from "lucide-react";
+import type { components } from "@/lib/api/schema";
 import { useRunsSummaryQuery } from "@/lib/query/hooks";
 import type { StatCardData, StatCardKey } from "@/lib/stat-cards";
 import { deriveStatCards } from "@/lib/stat-cards";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { StatCard } from "./stat-card";
+
+type RunSummaryResponse = components["schemas"]["RunSummaryResponse"];
 
 const CARD_VISUALS: Record<
   StatCardKey,
@@ -28,15 +31,21 @@ const CARD_VISUALS: Record<
 };
 
 function formatCount(value: number): string {
-  return value.toLocaleString("en-US");
+  return Math.round(value).toLocaleString("en-US");
 }
 
 function formatCurrency(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
-export function StatCardsRow({ period }: { period: string | undefined }) {
-  const summaryQuery = useRunsSummaryQuery(period);
+export function StatCardsRow({
+  period,
+  initialSummary,
+}: {
+  period: string | undefined;
+  initialSummary?: RunSummaryResponse;
+}) {
+  const summaryQuery = useRunsSummaryQuery(period, undefined, initialSummary);
   const reducedMotion = useReducedMotion();
 
   if (summaryQuery.isPending) {

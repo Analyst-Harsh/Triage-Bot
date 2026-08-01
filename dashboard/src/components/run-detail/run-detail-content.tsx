@@ -29,7 +29,7 @@ export function RunDetailContent({
   const detail = detailQuery.data ?? initialDetail;
 
   return (
-    <div className="flex-1">
+    <div className="min-w-0 flex-1">
       <RunHeader owner={owner} repo={repo} issueNumber={issueNumber} detail={detail} />
       <main className="space-y-4 p-6">
         {detail.run.status === "pending_approval" && (
